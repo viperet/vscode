@@ -12,9 +12,9 @@ import { ICompressedTreeElement, ICompressedTreeNode } from 'vs/base/browser/ui/
 import { getVisibleState, isFilterResult } from 'vs/base/browser/ui/tree/indexTreeModel';
 import { CompressibleObjectTree, ICompressibleKeyboardNavigationLabelProvider, ICompressibleObjectTreeOptions, ICompressibleTreeRenderer, IObjectTreeOptions, IObjectTreeSetChildrenOptions, ObjectTree } from 'vs/base/browser/ui/tree/objectTree';
 import { IAsyncDataSource, ICollapseStateChangeEvent, ITreeContextMenuEvent, ITreeDragAndDrop, ITreeElement, ITreeEvent, ITreeFilter, ITreeMouseEvent, ITreeNode, ITreeRenderer, ITreeSorter, TreeError, TreeFilterResult, TreeVisibility, WeakMapper } from 'vs/base/browser/ui/tree/tree';
-import { treeItemLoadingIcon } from 'vs/base/browser/ui/tree/treeIcons';
 import { CancelablePromise, createCancelablePromise, Promises, timeout } from 'vs/base/common/async';
-import { isPromiseCanceledError, onUnexpectedError } from 'vs/base/common/errors';
+import { Codicon } from 'vs/base/common/codicons';
+import { isCancellationError, onUnexpectedError } from 'vs/base/common/errors';
 import { Emitter, Event } from 'vs/base/common/event';
 import { Iterable } from 'vs/base/common/iterator';
 import { DisposableStore, dispose, IDisposable } from 'vs/base/common/lifecycle';
@@ -109,10 +109,10 @@ class AsyncDataTreeRenderer<TInput, T, TFilterData, TTemplateData> implements IT
 
 	renderTwistie(element: IAsyncDataTreeNode<TInput, T>, twistieElement: HTMLElement): boolean {
 		if (element.slow) {
-			twistieElement.classList.add(...treeItemLoadingIcon.classNamesArray);
+			twistieElement.classList.add(...Codicon.treeItemLoading.classNamesArray);
 			return true;
 		} else {
-			twistieElement.classList.remove(...treeItemLoadingIcon.classNamesArray);
+			twistieElement.classList.remove(...Codicon.treeItemLoading.classNamesArray);
 			return false;
 		}
 	}
@@ -341,6 +341,7 @@ export class AsyncDataTree<TInput, T, TFilterData = void> implements IDisposable
 	get onDidFocus(): Event<void> { return this.tree.onDidFocus; }
 	get onDidBlur(): Event<void> { return this.tree.onDidBlur; }
 
+	get onDidChangeModel(): Event<void> { return this.tree.onDidChangeModel; }
 	get onDidChangeCollapseState(): Event<ICollapseStateChangeEvent<IAsyncDataTreeNode<TInput, T> | null, TFilterData>> { return this.tree.onDidChangeCollapseState; }
 
 	get onDidUpdateOptions(): Event<IAsyncDataTreeOptionsUpdate> { return this.tree.onDidUpdateOptions; }
@@ -782,7 +783,7 @@ export class AsyncDataTree<TInput, T, TFilterData = void> implements IDisposable
 				this.tree.collapse(node);
 			}
 
-			if (isPromiseCanceledError(err)) {
+			if (isCancellationError(err)) {
 				return [];
 			}
 
@@ -836,7 +837,7 @@ export class AsyncDataTree<TInput, T, TFilterData = void> implements IDisposable
 		}
 
 		const nodesToForget = new Map<T, IAsyncDataTreeNode<TInput, T>>();
-		const childrenTreeNodesById = new Map<string, { node: IAsyncDataTreeNode<TInput, T>, collapsed: boolean }>();
+		const childrenTreeNodesById = new Map<string, { node: IAsyncDataTreeNode<TInput, T>, collapsed: boolean; }>();
 
 		for (const child of node.children) {
 			nodesToForget.set(child.element as T, child);
@@ -1072,10 +1073,10 @@ class CompressibleAsyncDataTreeRenderer<TInput, T, TFilterData, TTemplateData> i
 
 	renderTwistie(element: IAsyncDataTreeNode<TInput, T>, twistieElement: HTMLElement): boolean {
 		if (element.slow) {
-			twistieElement.classList.add(...treeItemLoadingIcon.classNamesArray);
+			twistieElement.classList.add(...Codicon.treeItemLoading.classNamesArray);
 			return true;
 		} else {
-			twistieElement.classList.remove(...treeItemLoadingIcon.classNamesArray);
+			twistieElement.classList.remove(...Codicon.treeItemLoading.classNamesArray);
 			return false;
 		}
 	}

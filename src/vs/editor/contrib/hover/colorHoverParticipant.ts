@@ -3,19 +3,20 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { AsyncIterableObject } from 'vs/base/common/async';
+import { CancellationToken } from 'vs/base/common/cancellation';
+import { Color, RGBA } from 'vs/base/common/color';
 import { Disposable, DisposableStore, IDisposable } from 'vs/base/common/lifecycle';
 import { ICodeEditor } from 'vs/editor/browser/editorBrowser';
+import { EditorOption } from 'vs/editor/common/config/editorOptions';
 import { Range } from 'vs/editor/common/core/range';
-import { DocumentColorProvider, IColorInformation } from 'vs/editor/common/modes';
 import { IIdentifiedSingleEditOperation, IModelDecoration, ITextModel, TrackedRangeStickiness } from 'vs/editor/common/model';
-import { HoverAnchor, HoverAnchorType, IEditorHover, IEditorHoverParticipant, IEditorHoverStatusBar, IHoverPart } from 'vs/editor/contrib/hover/hoverTypes';
-import { CancellationToken } from 'vs/base/common/cancellation';
+import { DocumentColorProvider, IColorInformation } from 'vs/editor/common/languages';
 import { getColorPresentations } from 'vs/editor/contrib/colorPicker/color';
 import { ColorDetector } from 'vs/editor/contrib/colorPicker/colorDetector';
-import { Color, RGBA } from 'vs/base/common/color';
 import { ColorPickerModel } from 'vs/editor/contrib/colorPicker/colorPickerModel';
 import { ColorPickerWidget } from 'vs/editor/contrib/colorPicker/colorPickerWidget';
-import { EditorOption } from 'vs/editor/common/config/editorOptions';
+import { HoverAnchor, HoverAnchorType, IEditorHoverParticipant, IEditorHoverRenderContext, IHoverPart } from 'vs/editor/contrib/hover/hoverTypes';
 import { IThemeService } from 'vs/platform/theme/common/themeService';
 
 export class ColorHover implements IHoverPart {
@@ -46,7 +47,6 @@ export class ColorHoverParticipant implements IEditorHoverParticipant<ColorHover
 
 	constructor(
 		private readonly _editor: ICodeEditor,
-		private readonly _hover: IEditorHover,
 		@IThemeService private readonly _themeService: IThemeService,
 	) { }
 
@@ -54,17 +54,29 @@ export class ColorHoverParticipant implements IEditorHoverParticipant<ColorHover
 		return [];
 	}
 
-	public async computeAsync(anchor: HoverAnchor, lineDecorations: IModelDecoration[], token: CancellationToken): Promise<ColorHover[]> {
+	public computeAsync(anchor: HoverAnchor, lineDecorations: IModelDecoration[], token: CancellationToken): AsyncIterableObject<ColorHover> {
+		return AsyncIterableObject.fromPromise(this._computeAsync(anchor, lineDecorations, token));
+	}
+
+	private async _computeAsync(anchor: HoverAnchor, lineDecorations: IModelDecoration[], token: CancellationToken): Promise<ColorHover[]> {
 		if (!this._editor.hasModel()) {
 			return [];
 		}
 		const colorDetector = ColorDetector.get(this._editor);
+		if (!colorDetector) {
+			return [];
+		}
 		for (const d of lineDecorations) {
+			if (!colorDetector.isColorDecorationId(d.id)) {
+				continue;
+			}
+
 			const colorData = colorDetector.getColorData(d.range.getStartPosition());
 			if (colorData) {
 				const colorHover = await this._createColorHover(this._editor.getModel(), colorData.colorInfo, colorData.provider);
 				return [colorHover];
 			}
+
 		}
 		return [];
 	}
@@ -83,7 +95,7 @@ export class ColorHoverParticipant implements IEditorHoverParticipant<ColorHover
 		return new ColorHover(this, Range.lift(colorInfo.range), model, provider);
 	}
 
-	public renderHoverParts(hoverParts: ColorHover[], fragment: DocumentFragment, statusBar: IEditorHoverStatusBar): IDisposable {
+	public renderHoverParts(context: IEditorHoverRenderContext, hoverParts: ColorHover[]): IDisposable {
 		if (hoverParts.length === 0 || !this._editor.hasModel()) {
 			return Disposable.None;
 		}
@@ -92,7 +104,8 @@ export class ColorHoverParticipant implements IEditorHoverParticipant<ColorHover
 		const colorHover = hoverParts[0];
 		const editorModel = this._editor.getModel();
 		const model = colorHover.model;
-		const widget = disposables.add(new ColorPickerWidget(fragment, model, this._editor.getOption(EditorOption.pixelRatio), this._themeService));
+		const widget = disposables.add(new ColorPickerWidget(context.fragment, model, this._editor.getOption(EditorOption.pixelRatio), this._themeService));
+		context.setColorPicker(widget);
 
 		let range = new Range(colorHover.range.startLineNumber, colorHover.range.startColumn, colorHover.range.endLineNumber, colorHover.range.endColumn);
 
@@ -121,7 +134,7 @@ export class ColorHoverParticipant implements IEditorHoverParticipant<ColorHover
 			if (model.presentation.additionalTextEdits) {
 				textEdits = [...model.presentation.additionalTextEdits as IIdentifiedSingleEditOperation[]];
 				this._editor.executeEdits('colorpicker', textEdits);
-				this._hover.hide();
+				context.hide();
 			}
 			this._editor.pushUndoStop();
 			range = newRange;
@@ -145,8 +158,6 @@ export class ColorHoverParticipant implements IEditorHoverParticipant<ColorHover
 			updateColorPresentations(color).then(updateEditorModel);
 		}));
 		disposables.add(model.onDidChangeColor(updateColorPresentations));
-
-		this._hover.setColorPicker(widget);
 
 		return disposables;
 	}

@@ -5,12 +5,13 @@
 
 import { localize } from 'vs/nls';
 import { RawContextKey } from 'vs/platform/contextkey/common/contextkey';
-import { ViewContainerLocation } from 'vs/workbench/common/views';
 import { TestExplorerViewMode, TestExplorerViewSorting } from 'vs/workbench/contrib/testing/common/constants';
 import { TestRunProfileBitset } from 'vs/workbench/contrib/testing/common/testCollection';
 
 export namespace TestingContextKeys {
 	export const providerCount = new RawContextKey('testing.providerCount', 0);
+	export const canRefreshTests = new RawContextKey('testing.canRefresh', false, { type: 'boolean', description: localize('testing.canRefresh', 'Indicates whether any test controller has an attached refresh handler.') });
+	export const isRefreshingTests = new RawContextKey('testing.isRefreshing', false, { type: 'boolean', description: localize('testing.isRefreshing', 'Indicates whether any test controller is currently refreshing tests.') });
 	export const hasDebuggableTests = new RawContextKey('testing.hasDebuggableTests', false, { type: 'boolean', description: localize('testing.hasDebuggableTests', 'Indicates whether any test controller has registered a debug configuration') });
 	export const hasRunnableTests = new RawContextKey('testing.hasRunnableTests', false, { type: 'boolean', description: localize('testing.hasRunnableTests', 'Indicates whether any test controller has registered a run configuration') });
 	export const hasCoverableTests = new RawContextKey('testing.hasCoverableTests', false, { type: 'boolean', description: localize('testing.hasCoverableTests', 'Indicates whether any test controller has registered a coverage configuration') });
@@ -31,7 +32,6 @@ export namespace TestingContextKeys {
 	export const isRunning = new RawContextKey('testing.isRunning', false);
 	export const isInPeek = new RawContextKey('testing.isInPeek', true);
 	export const isPeekVisible = new RawContextKey('testing.isPeekVisible', false);
-	export const explorerLocation = new RawContextKey('testing.explorerLocation', ViewContainerLocation.Sidebar);
 	export const autoRun = new RawContextKey('testing.autoRun', false);
 
 	export const peekItemType = new RawContextKey<string | undefined>('peekItemType', undefined, {

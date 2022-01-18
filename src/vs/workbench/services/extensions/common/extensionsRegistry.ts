@@ -12,6 +12,9 @@ import { Extensions, IJSONContributionRegistry } from 'vs/platform/jsonschemas/c
 import { Registry } from 'vs/platform/registry/common/platform';
 import { IMessage } from 'vs/workbench/services/extensions/common/extensions';
 import { ExtensionIdentifier, IExtensionDescription, EXTENSION_CATEGORIES, ExtensionKind } from 'vs/platform/extensions/common/extensions';
+import { allApiProposals } from 'vs/workbench/services/extensions/common/extensionsApiProposals';
+import { values } from 'vs/base/common/collections';
+import { productSchemaId } from 'vs/platform/product/common/productService';
 
 const schemaRegistry = Registry.as<IJSONContributionRegistry>(Extensions.JSONContribution);
 
@@ -148,13 +151,11 @@ const extensionKindSchema: IJSONSchema = {
 	type: 'string',
 	enum: [
 		'ui',
-		'workspace',
-		'web'
+		'workspace'
 	],
 	enumDescriptions: [
 		nls.localize('ui', "UI extension kind. In a remote window, such extensions are enabled only when available on the local machine."),
 		nls.localize('workspace', "Workspace extension kind. In a remote window, such extensions are enabled only when available on the remote."),
-		nls.localize('web', "Web worker extension kind. Such an extension can execute in a web worker extension host.")
 	],
 };
 
@@ -223,6 +224,20 @@ export const schema: IJSONSchema = {
 			type: 'boolean',
 			description: nls.localize('vscode.extension.preview', 'Sets the extension to be flagged as a Preview in the Marketplace.'),
 		},
+		enableProposedApi: {
+			type: 'boolean',
+			deprecationMessage: nls.localize('vscode.extension.enableProposedApi.deprecated', 'Use `enabledApiProposals` instead.'),
+		},
+		enabledApiProposals: {
+			markdownDescription: nls.localize('vscode.extension.enabledApiProposals', 'Enable API proposals to try them out. Only valid **during development**. Extensions **cannot be published** with this property. For more details visit: https://code.visualstudio.com/api/advanced-topics/using-proposed-api'),
+			type: 'array',
+			uniqueItems: true,
+			items: {
+				type: 'string',
+				enum: Object.keys(allApiProposals),
+				markdownEnumDescriptions: values(allApiProposals)
+			}
+		},
 		activationEvents: {
 			description: nls.localize('vscode.extension.activationEvents', 'Activation events for the VS Code extension.'),
 			type: 'array',
@@ -273,6 +288,11 @@ export const schema: IJSONSchema = {
 						label: 'onStartupFinished',
 						description: nls.localize('vscode.extension.activationEvents.onStartupFinished', 'An activation event emitted after the start-up finished (after all `*` activated extensions have finished activating).'),
 						body: 'onStartupFinished'
+					},
+					{
+						label: 'onTaskType',
+						description: nls.localize('vscode.extension.activationEvents.onTaskType', 'An activation event emitted whenever tasks of a certain type need to be listed or resolved.'),
+						body: 'onTaskType:${1:taskType}'
 					},
 					{
 						label: 'onFileSystem',
@@ -547,3 +567,29 @@ Registry.add(PRExtensions.ExtensionsRegistry, new ExtensionsRegistryImpl());
 export const ExtensionsRegistry: ExtensionsRegistryImpl = Registry.as(PRExtensions.ExtensionsRegistry);
 
 schemaRegistry.registerSchema(schemaId, schema);
+
+
+schemaRegistry.registerSchema(productSchemaId, {
+	properties: {
+		extensionAllowedProposedApi: {
+			type: 'array',
+			deprecationMessage: nls.localize('product.extensionAllowedProposedApi', "Use `extensionEnabledApiProposals` instead.")
+		},
+		extensionEnabledApiProposals: {
+			description: nls.localize('product.extensionEnabledApiProposals', "API proposals that the respective extensions can freely use."),
+			type: 'object',
+			properties: {},
+			additionalProperties: {
+				anyOf: [{
+					type: 'array',
+					uniqueItems: true,
+					items: {
+						type: 'string',
+						enum: Object.keys(allApiProposals),
+						markdownEnumDescriptions: values(allApiProposals)
+					}
+				}]
+			}
+		}
+	}
+});

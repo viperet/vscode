@@ -69,9 +69,9 @@ export class DiffNestedCellViewModel extends Disposable implements IDiffNestedCe
 
 	protected _outputCollection: number[] = [];
 	protected _outputsTop: PrefixSumComputer | null = null;
-	protected readonly _onDidChangeOutputLayout = new Emitter<void>();
-	readonly onDidChangeOutputLayout = this._onDidChangeOutputLayout.event;
 
+	protected readonly _onDidChangeOutputLayout = this._register(new Emitter<void>());
+	readonly onDidChangeOutputLayout = this._onDidChangeOutputLayout.event;
 
 	constructor(
 		readonly textModel: NotebookCellTextModel,
@@ -119,7 +119,7 @@ export class DiffNestedCellViewModel extends Disposable implements IDiffNestedCe
 
 		this._ensureOutputsTop();
 		this._outputCollection[index] = height;
-		if (this._outputsTop!.changeValue(index, height)) {
+		if (this._outputsTop!.setValue(index, height)) {
 			this._onDidChangeOutputLayout.fire();
 		}
 	}

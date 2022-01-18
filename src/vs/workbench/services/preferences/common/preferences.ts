@@ -7,16 +7,17 @@ import { IStringDictionary } from 'vs/base/common/collections';
 import { Event } from 'vs/base/common/event';
 import { IMatch } from 'vs/base/common/filters';
 import { IJSONSchema, IJSONSchemaMap } from 'vs/base/common/jsonSchema';
-import { ResolvedKeybinding } from 'vs/base/common/keyCodes';
+import { ResolvedKeybinding } from 'vs/base/common/keybindings';
 import { URI } from 'vs/base/common/uri';
 import { IRange } from 'vs/editor/common/core/range';
 import { ITextModel } from 'vs/editor/common/model';
 import { ConfigurationTarget } from 'vs/platform/configuration/common/configuration';
-import { ConfigurationScope, EditPresentationTypes, IConfigurationExtensionInfo } from 'vs/platform/configuration/common/configurationRegistry';
+import { ConfigurationScope, EditPresentationTypes, IExtensionInfo } from 'vs/platform/configuration/common/configurationRegistry';
 import { EditorResolution, IEditorOptions } from 'vs/platform/editor/common/editor';
 import { createDecorator } from 'vs/platform/instantiation/common/instantiation';
 import { ResolvedKeybindingItem } from 'vs/platform/keybinding/common/resolvedKeybindingItem';
-import { IEditorInput, IEditorPane } from 'vs/workbench/common/editor';
+import { IEditorPane } from 'vs/workbench/common/editor';
+import { EditorInput } from 'vs/workbench/common/editor/editorInput';
 import { Settings2EditorModel } from 'vs/workbench/services/preferences/common/preferencesModels';
 
 export enum SettingValueType {
@@ -27,7 +28,7 @@ export enum SettingValueType {
 	Integer = 'integer',
 	Number = 'number',
 	Boolean = 'boolean',
-	StringOrEnumArray = 'string-or-enum-array',
+	Array = 'array',
 	Exclude = 'exclude',
 	Complex = 'complex',
 	NullableInteger = 'nullable-integer',
@@ -42,7 +43,8 @@ export interface ISettingsGroup {
 	title: string;
 	titleRange: IRange;
 	sections: ISettingsSection[];
-	extensionInfo?: IConfigurationExtensionInfo;
+	order?: number;
+	extensionInfo?: IExtensionInfo;
 }
 
 export interface ISettingsSection {
@@ -67,6 +69,7 @@ export interface ISetting {
 
 	scope?: ConfigurationScope;
 	type?: string | string[];
+	order?: number;
 	arrayItemType?: string;
 	objectProperties?: IJSONSchemaMap,
 	objectPatternProperties?: IJSONSchemaMap,
@@ -78,11 +81,12 @@ export interface ISetting {
 	tags?: string[];
 	disallowSyncIgnore?: boolean;
 	restricted?: boolean;
-	extensionInfo?: IConfigurationExtensionInfo;
+	extensionInfo?: IExtensionInfo;
 	validator?: (value: any) => string | null;
 	enumItemLabels?: string[];
 	allKeysAreBoolean?: boolean;
 	editPresentation?: EditPresentationTypes;
+	defaultValueSource?: string | IExtensionInfo;
 }
 
 export interface IExtensionSetting extends ISetting {
@@ -112,9 +116,21 @@ export interface IFilterResult {
 	exactMatch?: boolean;
 }
 
+/**
+ * The ways a setting could match a query,
+ * sorted in increasing order of relevance.
+ * For now, ignore description and value matches.
+ */
+export enum SettingMatchType {
+	None = 0,
+	WholeWordMatch = 1 << 0,
+	KeyMatch = 1 << 1
+}
+
 export interface ISettingMatch {
 	setting: ISetting;
 	matches: IRange[] | null;
+	matchType: SettingMatchType;
 	score: number;
 }
 
@@ -154,7 +170,7 @@ export interface IPreferencesEditorModel<T> {
 }
 
 export type IGroupFilter = (group: ISettingsGroup) => boolean | null;
-export type ISettingMatcher = (setting: ISetting, group: ISettingsGroup) => { matches: IRange[], score: number } | null;
+export type ISettingMatcher = (setting: ISetting, group: ISettingsGroup) => { matches: IRange[], matchType: SettingMatchType, score: number } | null;
 
 export interface ISettingsEditorModel extends IPreferencesEditorModel<ISetting> {
 	readonly onDidChangeGroups: Event<void>;
@@ -221,7 +237,7 @@ export interface IPreferencesService {
 	openDefaultKeybindingsFile(): Promise<IEditorPane | undefined>;
 	getEditableSettingsURI(configurationTarget: ConfigurationTarget, resource?: URI): Promise<URI | null>;
 
-	createSplitJsonEditorInput(configurationTarget: ConfigurationTarget, resource: URI): IEditorInput;
+	createSplitJsonEditorInput(configurationTarget: ConfigurationTarget, resource: URI): EditorInput;
 }
 
 export interface KeybindingMatch {

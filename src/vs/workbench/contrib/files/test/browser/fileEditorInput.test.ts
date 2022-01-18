@@ -7,42 +7,49 @@ import * as assert from 'assert';
 import { URI } from 'vs/base/common/uri';
 import { toResource } from 'vs/base/test/common/utils';
 import { FileEditorInput } from 'vs/workbench/contrib/files/browser/editors/fileEditorInput';
-import { workbenchInstantiationService, TestServiceAccessor, TestEditorService, getLastResolvedFileStat } from 'vs/workbench/test/browser/workbenchTestServices';
+import { workbenchInstantiationService, TestServiceAccessor, getLastResolvedFileStat } from 'vs/workbench/test/browser/workbenchTestServices';
 import { IInstantiationService } from 'vs/platform/instantiation/common/instantiation';
 import { IEditorFactoryRegistry, Verbosity, EditorExtensions, EditorInputCapabilities } from 'vs/workbench/common/editor';
 import { EncodingMode, TextFileOperationError, TextFileOperationResult } from 'vs/workbench/services/textfile/common/textfiles';
 import { FileOperationResult, FileOperationError, NotModifiedSinceFileOperationError, FileSystemProviderCapabilities } from 'vs/platform/files/common/files';
 import { TextFileEditorModel } from 'vs/workbench/services/textfile/common/textFileEditorModel';
 import { timeout } from 'vs/base/common/async';
-import { ModesRegistry, PLAINTEXT_MODE_ID } from 'vs/editor/common/modes/modesRegistry';
+import { ModesRegistry, PLAINTEXT_LANGUAGE_ID } from 'vs/editor/common/languages/modesRegistry';
 import { DisposableStore } from 'vs/base/common/lifecycle';
 import { BinaryEditorModel } from 'vs/workbench/common/editor/binaryEditorModel';
 import { IResourceEditorInput } from 'vs/platform/editor/common/editor';
 import { Registry } from 'vs/platform/registry/common/platform';
 import { FileEditorInputSerializer } from 'vs/workbench/contrib/files/browser/editors/fileEditorHandler';
 import { InMemoryFileSystemProvider } from 'vs/platform/files/common/inMemoryFilesystemProvider';
+import { TextEditorService } from 'vs/workbench/services/textfile/common/textEditorService';
 
 suite('Files - FileEditorInput', () => {
 
+	let disposables: DisposableStore;
 	let instantiationService: IInstantiationService;
 	let accessor: TestServiceAccessor;
 
-	function createFileInput(resource: URI, preferredResource?: URI, preferredMode?: string, preferredName?: string, preferredDescription?: string, preferredContents?: string): FileEditorInput {
-		return instantiationService.createInstance(FileEditorInput, resource, preferredResource, preferredName, preferredDescription, undefined, preferredMode, preferredContents);
+	function createFileInput(resource: URI, preferredResource?: URI, preferredLanguageId?: string, preferredName?: string, preferredDescription?: string, preferredContents?: string): FileEditorInput {
+		return instantiationService.createInstance(FileEditorInput, resource, preferredResource, preferredName, preferredDescription, undefined, preferredLanguageId, preferredContents);
+	}
+
+	class TestTextEditorService extends TextEditorService {
+		override createTextEditor(input: IResourceEditorInput) {
+			return createFileInput(input.resource);
+		}
 	}
 
 	setup(() => {
+		disposables = new DisposableStore();
 		instantiationService = workbenchInstantiationService({
-			editorService: () => {
-				return new class extends TestEditorService {
-					override createEditorInput(input: IResourceEditorInput) {
-						return createFileInput(input.resource);
-					}
-				};
-			}
-		});
+			textEditorService: instantiationService => instantiationService.createInstance(TestTextEditorService)
+		}, disposables);
 
 		accessor = instantiationService.createInstance(TestServiceAccessor);
+	});
+
+	teardown(() => {
+		disposables.dispose();
 	});
 
 	test('Basics', async function () {
@@ -162,27 +169,27 @@ suite('Files - FileEditorInput', () => {
 		listener.dispose();
 	});
 
-	test('preferred mode', async function () {
-		const mode = 'file-input-test';
+	test('preferred language', async function () {
+		const languageId = 'file-input-test';
 		ModesRegistry.registerLanguage({
-			id: mode,
+			id: languageId,
 		});
 
-		const input = createFileInput(toResource.call(this, '/foo/bar/file.js'), undefined, mode);
-		assert.strictEqual(input.getPreferredMode(), mode);
+		const input = createFileInput(toResource.call(this, '/foo/bar/file.js'), undefined, languageId);
+		assert.strictEqual(input.getPreferredLanguageId(), languageId);
 
 		const model = await input.resolve() as TextFileEditorModel;
-		assert.strictEqual(model.textEditorModel!.getModeId(), mode);
+		assert.strictEqual(model.textEditorModel!.getLanguageId(), languageId);
 
-		input.setMode('text');
-		assert.strictEqual(input.getPreferredMode(), 'text');
-		assert.strictEqual(model.textEditorModel!.getModeId(), PLAINTEXT_MODE_ID);
+		input.setLanguageId('text');
+		assert.strictEqual(input.getPreferredLanguageId(), 'text');
+		assert.strictEqual(model.textEditorModel!.getLanguageId(), PLAINTEXT_LANGUAGE_ID);
 
 		const input2 = createFileInput(toResource.call(this, '/foo/bar/file.js'));
-		input2.setPreferredMode(mode);
+		input2.setPreferredLanguageId(languageId);
 
 		const model2 = await input2.resolve() as TextFileEditorModel;
-		assert.strictEqual(model2.textEditorModel!.getModeId(), mode);
+		assert.strictEqual(model2.textEditorModel!.getLanguageId(), languageId);
 	});
 
 	test('preferred contents', async function () {

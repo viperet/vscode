@@ -92,8 +92,8 @@ export function getBaseLabel(resource: URI | string | undefined): string | undef
 	return base;
 }
 
-export function normalizeDriveLetter(path: string): string {
-	if (hasDriveLetter(path)) {
+export function normalizeDriveLetter(path: string, continueAsWindows?: boolean): string {
+	if (hasDriveLetter(path, continueAsWindows)) {
 		return path.charAt(0).toUpperCase() + path.slice(1);
 	}
 
@@ -233,7 +233,7 @@ export function shorten(paths: string[], pathSeparator: string = sep): string[] 
 						result = prefix + result;
 					}
 
-					// add ellipsis at the beginning if neeeded
+					// add ellipsis at the beginning if needed
 					if (start > 0) {
 						result = result + ellipsis + pathSeparator;
 					}
@@ -276,7 +276,7 @@ interface ISegment {
 /**
  * Helper to insert values for specific template variables into the string. E.g. "this $(is) a $(template)" can be
  * passed to this function together with an object that maps "is" and "template" to strings to have them replaced.
- * @param value string to which templating is applied
+ * @param value string to which template is applied
  * @param values the values of the templates to use
  */
 export function template(template: string, values: { [key: string]: string | ISeparator | undefined | null; } = Object.create(null)): string {

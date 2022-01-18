@@ -3,9 +3,9 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { ITextModel, IModelDecorationOptions, IModelDeltaDecoration, IModelDecorationsChangeAccessor } from 'vs/editor/common/model';
-import { Event, Emitter } from 'vs/base/common/event';
-import { FoldingRegions, ILineRange, FoldingRegion } from './foldingRanges';
+import { Emitter, Event } from 'vs/base/common/event';
+import { IModelDecorationOptions, IModelDecorationsChangeAccessor, IModelDeltaDecoration, ITextModel } from 'vs/editor/common/model';
+import { FoldingRegion, FoldingRegions, ILineRange } from './foldingRanges';
 
 export interface IDecorationProvider {
 	getDecorationOption(isCollapsed: boolean, isHidden: boolean): IModelDecorationOptions;
@@ -379,7 +379,10 @@ export function setCollapseStateAtLevel(foldingModel: FoldingModel, foldLevel: n
 export function setCollapseStateForRest(foldingModel: FoldingModel, doCollapse: boolean, blockedLineNumbers: number[]): void {
 	let filteredRegions: FoldingRegion[] = [];
 	for (let lineNumber of blockedLineNumbers) {
-		filteredRegions.push(foldingModel.getAllRegionsAtLine(lineNumber, undefined)[0]);
+		const regions = foldingModel.getAllRegionsAtLine(lineNumber, undefined);
+		if (regions.length > 0) {
+			filteredRegions.push(regions[0]);
+		}
 	}
 	let filter = (region: FoldingRegion) => filteredRegions.every((filteredRegion) => !filteredRegion.containedBy(region) && !region.containedBy(filteredRegion)) && region.isCollapsed !== doCollapse;
 	let toToggle = foldingModel.getRegionsInside(null, filter);
@@ -454,17 +457,18 @@ export function getParentFoldLine(lineNumber: number, foldingModel: FoldingModel
  */
 export function getPreviousFoldLine(lineNumber: number, foldingModel: FoldingModel): number | null {
 	let foldingRegion = foldingModel.getRegionAtLine(lineNumber);
-	if (foldingRegion !== null) {
+	// If on the folding range start line, go to previous sibling.
+	if (foldingRegion !== null && foldingRegion.startLineNumber === lineNumber) {
 		// If current line is not the start of the current fold, go to top line of current fold. If not, go to previous fold.
 		if (lineNumber !== foldingRegion.startLineNumber) {
 			return foldingRegion.startLineNumber;
 		} else {
 			// Find min line number to stay within parent.
 			let expectedParentIndex = foldingRegion.parentIndex;
-			if (expectedParentIndex === -1) {
-				return null;
+			let minLineNumber = 0;
+			if (expectedParentIndex !== -1) {
+				minLineNumber = foldingModel.regions.getStartLineNumber(foldingRegion.parentIndex);
 			}
-			let minLineNumber = foldingModel.regions.getStartLineNumber(foldingRegion.parentIndex);
 
 			// Find fold at same level.
 			while (foldingRegion !== null) {
@@ -482,6 +486,22 @@ export function getPreviousFoldLine(lineNumber: number, foldingModel: FoldingMod
 				}
 			}
 		}
+	} else {
+		// Go to last fold that's before the current line.
+		if (foldingModel.regions.length > 0) {
+			foldingRegion = foldingModel.regions.toRegion(foldingModel.regions.length - 1);
+			while (foldingRegion !== null) {
+				// Found fold before current line.
+				if (foldingRegion.startLineNumber < lineNumber) {
+					return foldingRegion.startLineNumber;
+				}
+				if (foldingRegion.regionIndex > 0) {
+					foldingRegion = foldingModel.regions.toRegion(foldingRegion.regionIndex - 1);
+				} else {
+					foldingRegion = null;
+				}
+			}
+		}
 	}
 	return null;
 }
@@ -495,13 +515,18 @@ export function getPreviousFoldLine(lineNumber: number, foldingModel: FoldingMod
  */
 export function getNextFoldLine(lineNumber: number, foldingModel: FoldingModel): number | null {
 	let foldingRegion = foldingModel.getRegionAtLine(lineNumber);
-	if (foldingRegion !== null) {
+	// If on the folding range start line, go to next sibling.
+	if (foldingRegion !== null && foldingRegion.startLineNumber === lineNumber) {
 		// Find max line number to stay within parent.
 		let expectedParentIndex = foldingRegion.parentIndex;
-		if (expectedParentIndex === -1) {
+		let maxLineNumber = 0;
+		if (expectedParentIndex !== -1) {
+			maxLineNumber = foldingModel.regions.getEndLineNumber(foldingRegion.parentIndex);
+		} else if (foldingModel.regions.length === 0) {
 			return null;
+		} else {
+			maxLineNumber = foldingModel.regions.getEndLineNumber(foldingModel.regions.length - 1);
 		}
-		let maxLineNumber = foldingModel.regions.getEndLineNumber(foldingRegion.parentIndex);
 
 		// Find fold at same level.
 		while (foldingRegion !== null) {
@@ -516,6 +541,22 @@ export function getNextFoldLine(lineNumber: number, foldingModel: FoldingModel):
 				}
 			} else {
 				return null;
+			}
+		}
+	} else {
+		// Go to first fold that's after the current line.
+		if (foldingModel.regions.length > 0) {
+			foldingRegion = foldingModel.regions.toRegion(0);
+			while (foldingRegion !== null) {
+				// Found fold after current line.
+				if (foldingRegion.startLineNumber > lineNumber) {
+					return foldingRegion.startLineNumber;
+				}
+				if (foldingRegion.regionIndex < foldingModel.regions.length) {
+					foldingRegion = foldingModel.regions.toRegion(foldingRegion.regionIndex + 1);
+				} else {
+					foldingRegion = null;
+				}
 			}
 		}
 	}

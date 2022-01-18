@@ -212,10 +212,16 @@ declare module DebugProtocol {
 	export interface OutputEvent extends Event {
 		// event: 'output';
 		body: {
-			/** The output category. If not specified, 'console' is assumed.
-				Values: 'console', 'stdout', 'stderr', 'telemetry', etc.
+			/** The output category. If not specified or if the category is not understand by the client, 'console' is assumed.
+				Values:
+				'console': Show the output in the client's default message UI, e.g. a 'debug console'. This category should only be used for informational output from the debugger (as opposed to the debuggee).
+				'important': A hint for the client to show the ouput in the client's UI for important and highly visible information, e.g. as a popup notification. This category should only be used for important messages from the debugger (as opposed to the debuggee). Since this category value is a hint, clients might ignore the hint and assume the 'console' category.
+				'stdout': Show the output as normal program output from the debuggee.
+				'stderr': Show the output as error program output from the debuggee.
+				'telemetry': Send the output to telemetry instead of showing it to the user.
+				etc.
 			*/
-			category?: 'console' | 'stdout' | 'stderr' | 'telemetry' | string;
+			category?: 'console' | 'important' | 'stdout' | 'stderr' | 'telemetry' | string;
 			/** The output to report. */
 			output: string;
 			/** Support for keeping an output log organized by grouping related messages.
@@ -398,6 +404,23 @@ declare module DebugProtocol {
 		};
 	}
 
+	/** Event message for 'memory' event type.
+		This event indicates that some memory range has been updated. It should only be sent if the debug adapter has received a value true for the `supportsMemoryEvent` capability of the `initialize` request.
+		Clients typically react to the event by re-issuing a `readMemory` request if they show the memory identified by the `memoryReference` and if the updated memory range overlaps the displayed range. Clients should not make assumptions how individual memory references relate to each other, so they should not assume that they are part of a single continuous address range and might overlap.
+		Debug adapters can use this event to indicate that the contents of a memory range has changed due to some other DAP request like `setVariable` or `setExpression`. Debug adapters are not expected to emit this event for each and every memory change of a running program, because that information is typically not available from debuggers and it would flood clients with too many events.
+	*/
+	export interface MemoryEvent extends Event {
+		// event: 'memory';
+		body: {
+			/** Memory reference of a memory range that has been updated. */
+			memoryReference: string;
+			/** Starting offset in bytes where memory has been updated. Can be negative. */
+			offset: number;
+			/** Number of bytes updated. */
+			count: number;
+		};
+	}
+
 	/** RunInTerminal request; value of command field is 'runInTerminal'.
 		This optional request is sent from the debug adapter to the client to run a command in a terminal.
 		This is typically used to launch the debuggee in a terminal provided by the client.
@@ -474,6 +497,8 @@ declare module DebugProtocol {
 		supportsProgressReporting?: boolean;
 		/** Client supports the invalidated event. */
 		supportsInvalidatedEvent?: boolean;
+		/** Client supports the memory event. */
+		supportsMemoryEvent?: boolean;
 	}
 
 	/** Response to 'initialize' request. */
@@ -763,7 +788,7 @@ declare module DebugProtocol {
 		/** Reference to the Variable container if the data breakpoint is requested for a child of the container. */
 		variablesReference?: number;
 		/** The name of the Variable's child to obtain data breakpoint information for.
-			If variablesReference isn’t provided, this can be an expression.
+			If variablesReference isn't provided, this can be an expression.
 		*/
 		name: string;
 	}
@@ -835,7 +860,7 @@ declare module DebugProtocol {
 	}
 
 	/** Continue request; value of command field is 'continue'.
-		The request starts the debuggee to run again.
+		The request resumes execution of all threads. If the debug adapter supports single thread execution (see capability 'supportsSingleThreadExecutionRequests') setting the 'singleThread' argument to true resumes only the specified thread. If not all threads were resumed, the 'allThreadsContinued' attribute of the response must be set to false.
 	*/
 	export interface ContinueRequest extends Request {
 		// command: 'continue';
@@ -844,24 +869,23 @@ declare module DebugProtocol {
 
 	/** Arguments for 'continue' request. */
 	export interface ContinueArguments {
-		/** Continue execution for the specified thread (if possible).
-			If the backend cannot continue on a single thread but will continue on all threads, it should set the 'allThreadsContinued' attribute in the response to true.
-		*/
+		/** Specifies the active thread. If the debug adapter supports single thread execution (see 'supportsSingleThreadExecutionRequests') and the optional argument 'singleThread' is true, only the thread with this ID is resumed. */
 		threadId: number;
+		/** If this optional flag is true, execution is resumed only for the thread with given 'threadId'. */
+		singleThread?: boolean;
 	}
 
 	/** Response to 'continue' request. */
 	export interface ContinueResponse extends Response {
 		body: {
-			/** If true, the 'continue' request has ignored the specified thread and continued all threads instead.
-				If this attribute is missing a value of 'true' is assumed for backward compatibility.
-			*/
+			/** The value true (or a missing property) signals to the client that all threads have been resumed. The value false must be returned if not all threads were resumed. */
 			allThreadsContinued?: boolean;
 		};
 	}
 
 	/** Next request; value of command field is 'next'.
-		The request starts the debuggee to run again for one step.
+		The request executes one step (in the given granularity) for the specified thread and allows all other threads to run freely by resuming them.
+		If the debug adapter supports single thread execution (see capability 'supportsSingleThreadExecutionRequests') setting the 'singleThread' argument to true prevents other suspended threads from resuming.
 		The debug adapter first sends the response and then a 'stopped' event (with reason 'step') after the step has completed.
 	*/
 	export interface NextRequest extends Request {
@@ -871,8 +895,10 @@ declare module DebugProtocol {
 
 	/** Arguments for 'next' request. */
 	export interface NextArguments {
-		/** Execute 'next' for this thread. */
+		/** Specifies the thread for which to resume execution for one step (of the given granularity). */
 		threadId: number;
+		/** If this optional flag is true, all other suspended threads are not resumed. */
+		singleThread?: boolean;
 		/** Optional granularity to step. If no granularity is specified, a granularity of 'statement' is assumed. */
 		granularity?: SteppingGranularity;
 	}
@@ -882,8 +908,9 @@ declare module DebugProtocol {
 	}
 
 	/** StepIn request; value of command field is 'stepIn'.
-		The request starts the debuggee to step into a function/method if possible.
-		If it cannot step into a target, 'stepIn' behaves like 'next'.
+		The request resumes the given thread to step into a function/method and allows all other threads to run freely by resuming them.
+		If the debug adapter supports single thread execution (see capability 'supportsSingleThreadExecutionRequests') setting the 'singleThread' argument to true prevents other suspended threads from resuming.
+		If the request cannot step into a target, 'stepIn' behaves like the 'next' request.
 		The debug adapter first sends the response and then a 'stopped' event (with reason 'step') after the step has completed.
 		If there are multiple function/method calls (or other targets) on the source line,
 		the optional argument 'targetId' can be used to control into which target the 'stepIn' should occur.
@@ -896,8 +923,10 @@ declare module DebugProtocol {
 
 	/** Arguments for 'stepIn' request. */
 	export interface StepInArguments {
-		/** Execute 'stepIn' for this thread. */
+		/** Specifies the thread for which to resume execution for one step-into (of the given granularity). */
 		threadId: number;
+		/** If this optional flag is true, all other suspended threads are not resumed. */
+		singleThread?: boolean;
 		/** Optional id of the target to step into. */
 		targetId?: number;
 		/** Optional granularity to step. If no granularity is specified, a granularity of 'statement' is assumed. */
@@ -909,7 +938,8 @@ declare module DebugProtocol {
 	}
 
 	/** StepOut request; value of command field is 'stepOut'.
-		The request starts the debuggee to run again for one step.
+		The request resumes the given thread to step out (return) from a function/method and allows all other threads to run freely by resuming them.
+		If the debug adapter supports single thread execution (see capability 'supportsSingleThreadExecutionRequests') setting the 'singleThread' argument to true prevents other suspended threads from resuming.
 		The debug adapter first sends the response and then a 'stopped' event (with reason 'step') after the step has completed.
 	*/
 	export interface StepOutRequest extends Request {
@@ -919,8 +949,10 @@ declare module DebugProtocol {
 
 	/** Arguments for 'stepOut' request. */
 	export interface StepOutArguments {
-		/** Execute 'stepOut' for this thread. */
+		/** Specifies the thread for which to resume execution for one step-out (of the given granularity). */
 		threadId: number;
+		/** If this optional flag is true, all other suspended threads are not resumed. */
+		singleThread?: boolean;
 		/** Optional granularity to step. If no granularity is specified, a granularity of 'statement' is assumed. */
 		granularity?: SteppingGranularity;
 	}
@@ -930,7 +962,8 @@ declare module DebugProtocol {
 	}
 
 	/** StepBack request; value of command field is 'stepBack'.
-		The request starts the debuggee to run one step backwards.
+		The request executes one backward step (in the given granularity) for the specified thread and allows all other threads to run backward freely by resuming them.
+		If the debug adapter supports single thread execution (see capability 'supportsSingleThreadExecutionRequests') setting the 'singleThread' argument to true prevents other suspended threads from resuming.
 		The debug adapter first sends the response and then a 'stopped' event (with reason 'step') after the step has completed.
 		Clients should only call this request if the capability 'supportsStepBack' is true.
 	*/
@@ -941,8 +974,10 @@ declare module DebugProtocol {
 
 	/** Arguments for 'stepBack' request. */
 	export interface StepBackArguments {
-		/** Execute 'stepBack' for this thread. */
+		/** Specifies the thread for which to resume execution for one step backwards (of the given granularity). */
 		threadId: number;
+		/** If this optional flag is true, all other suspended threads are not resumed. */
+		singleThread?: boolean;
 		/** Optional granularity to step. If no granularity is specified, a granularity of 'statement' is assumed. */
 		granularity?: SteppingGranularity;
 	}
@@ -952,7 +987,7 @@ declare module DebugProtocol {
 	}
 
 	/** ReverseContinue request; value of command field is 'reverseContinue'.
-		The request starts the debuggee to run backward.
+		The request resumes backward execution of all threads. If the debug adapter supports single thread execution (see capability 'supportsSingleThreadExecutionRequests') setting the 'singleThread' argument to true resumes only the specified thread. If not all threads were resumed, the 'allThreadsContinued' attribute of the response must be set to false.
 		Clients should only call this request if the capability 'supportsStepBack' is true.
 	*/
 	export interface ReverseContinueRequest extends Request {
@@ -962,8 +997,10 @@ declare module DebugProtocol {
 
 	/** Arguments for 'reverseContinue' request. */
 	export interface ReverseContinueArguments {
-		/** Execute 'reverseContinue' for this thread. */
+		/** Specifies the active thread. If the debug adapter supports single thread execution (see 'supportsSingleThreadExecutionRequests') and the optional argument 'singleThread' is true, only the thread with this ID is resumed. */
 		threadId: number;
+		/** If this optional flag is true, backward execution is resumed only for the thread with given 'threadId'. */
+		singleThread?: boolean;
 	}
 
 	/** Response to 'reverseContinue' request. This is just an acknowledgement, so no body field is required. */
@@ -1683,6 +1720,8 @@ declare module DebugProtocol {
 		supportsInstructionBreakpoints?: boolean;
 		/** The debug adapter supports 'filterOptions' as an argument on the 'setExceptionBreakpoints' request. */
 		supportsExceptionFilterOptions?: boolean;
+		/** The debug adapter supports the 'singleThread' property on the execution requests ('continue', 'next', 'stepIn', 'stepOut', 'reverseContinue', 'stepBack'). */
+		supportsSingleThreadExecutionRequests?: boolean;
 	}
 
 	/** An ExceptionBreakpointsFilter is shown in the UI as an filter option for configuring how exceptions are dealt with. */

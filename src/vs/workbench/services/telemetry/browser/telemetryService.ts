@@ -11,10 +11,10 @@ import { ILoggerService } from 'vs/platform/log/common/log';
 import { IProductService } from 'vs/platform/product/common/productService';
 import { IStorageService } from 'vs/platform/storage/common/storage';
 import { ClassifiedEvent, GDPRClassification, StrictPropertyCheck } from 'vs/platform/telemetry/common/gdprTypings';
-import { ITelemetryData, ITelemetryInfo, ITelemetryService } from 'vs/platform/telemetry/common/telemetry';
+import { ITelemetryData, ITelemetryInfo, ITelemetryService, TelemetryLevel } from 'vs/platform/telemetry/common/telemetry';
 import { TelemetryLogAppender } from 'vs/platform/telemetry/common/telemetryLogAppender';
 import { ITelemetryServiceConfig, TelemetryService as BaseTelemetryService } from 'vs/platform/telemetry/common/telemetryService';
-import { combinedAppender, ITelemetryAppender, NullTelemetryService } from 'vs/platform/telemetry/common/telemetryUtils';
+import { ITelemetryAppender, NullTelemetryService, supportsTelemetry, validateTelemetryData } from 'vs/platform/telemetry/common/telemetryUtils';
 import { IWorkbenchEnvironmentService } from 'vs/workbench/services/environment/common/environmentService';
 import { IRemoteAgentService } from 'vs/workbench/services/remote/common/remoteAgentService';
 import { resolveWorkbenchCommonProperties } from 'vs/workbench/services/telemetry/browser/workbenchCommonProperties';
@@ -67,6 +67,12 @@ class WebAppInsightsAppender implements ITelemetryAppender {
 			return;
 		}
 
+		data = validateTelemetryData(data);
+
+		// Web does not expect properties and measurements so we must
+		// spread them out. This is different from desktop which expects them
+		data = { ...data.properties, ...data.measurements };
+
 		// undefined assertion is ok since above two if statements cover both cases
 		this._aiClient!.trackEvent({ name: this._eventPrefix + '/' + eventName }, data);
 	}
@@ -113,11 +119,11 @@ export class TelemetryService extends Disposable implements ITelemetryService {
 	) {
 		super();
 
-		if (!!productService.enableTelemetry && productService.aiConfig?.asimovKey && environmentService.isBuilt) {
+		if (supportsTelemetry(productService, environmentService) && productService.aiConfig?.asimovKey) {
 			// If remote server is present send telemetry through that, else use the client side appender
 			const telemetryProvider: ITelemetryAppender = remoteAgentService.getConnection() !== null ? { log: remoteAgentService.logTelemetry.bind(remoteAgentService), flush: remoteAgentService.flushTelemetry.bind(remoteAgentService) } : new WebAppInsightsAppender('monacoworkbench', productService.aiConfig?.asimovKey);
 			const config: ITelemetryServiceConfig = {
-				appender: combinedAppender(new WebTelemetryAppender(telemetryProvider), new TelemetryLogAppender(loggerService, environmentService)),
+				appenders: [new WebTelemetryAppender(telemetryProvider), new TelemetryLogAppender(loggerService, environmentService)],
 				commonProperties: resolveWorkbenchCommonProperties(storageService, productService.commit, productService.version, environmentService.remoteAuthority, productService.embedderIdentifier, environmentService.options && environmentService.options.resolveCommonTelemetryProperties),
 				sendErrorTelemetry: false,
 			};
@@ -128,16 +134,12 @@ export class TelemetryService extends Disposable implements ITelemetryService {
 		}
 	}
 
-	setEnabled(value: boolean): void {
-		return this.impl.setEnabled(value);
-	}
-
 	setExperimentProperty(name: string, value: string): void {
 		return this.impl.setExperimentProperty(name, value);
 	}
 
-	get isOptedIn(): boolean {
-		return this.impl.isOptedIn;
+	get telemetryLevel(): TelemetryLevel {
+		return this.impl.telemetryLevel;
 	}
 
 	publicLog(eventName: string, data?: ITelemetryData, anonymizeFilePaths?: boolean): Promise<void> {

@@ -38,11 +38,11 @@ export interface IPaneStyles {
 /**
  * A Pane is a structured SplitView view.
  *
- * WARNING: You must call `render()` after you contruct it.
+ * WARNING: You must call `render()` after you construct it.
  * It can't be done automatically at the end of the ctor
  * because of the order of property initialization in TypeScript.
  * Subclasses wouldn't be able to set own properties
- * before the `render()` call, thus forbiding their use.
+ * before the `render()` call, thus forbidding their use.
  */
 export abstract class Pane extends Disposable implements IView {
 
@@ -444,6 +444,7 @@ export class PaneView extends Disposable {
 
 	orientation: Orientation;
 	readonly onDidSashChange: Event<number>;
+	readonly onDidSashReset: Event<number>;
 	readonly onDidScroll: Event<ScrollEvent>;
 
 	constructor(container: HTMLElement, options: IPaneViewOptions = {}) {
@@ -453,8 +454,20 @@ export class PaneView extends Disposable {
 		this.orientation = options.orientation ?? Orientation.VERTICAL;
 		this.element = append(container, $('.monaco-pane-view'));
 		this.splitview = this._register(new SplitView(this.element, { orientation: this.orientation }));
+		this.onDidSashReset = this.splitview.onDidSashReset;
 		this.onDidSashChange = this.splitview.onDidSashChange;
 		this.onDidScroll = this.splitview.onDidScroll;
+
+		const onKeyDown = this._register(new DomEmitter(this.element, 'keydown'));
+		const onHeaderKeyDown = Event.chain(onKeyDown.event)
+			.filter(e => e.target instanceof HTMLElement && e.target.classList.contains('pane-header'))
+			.map(e => new StandardKeyboardEvent(e));
+
+		this._register(onHeaderKeyDown.filter(e => e.keyCode === KeyCode.UpArrow)
+			.event(() => this.focusPrevious()));
+
+		this._register(onHeaderKeyDown.filter(e => e.keyCode === KeyCode.DownArrow)
+			.event(() => this.focusNext()));
 	}
 
 	addPane(pane: Pane, size: number, index = this.splitview.length): void {
@@ -568,6 +581,32 @@ export class PaneView extends Disposable {
 			this.animationTimer = undefined;
 			this.element.classList.remove('animated');
 		}, 200);
+	}
+
+	private getPaneHeaderElements(): HTMLElement[] {
+		return [...this.element.querySelectorAll('.pane-header')] as HTMLElement[];
+	}
+
+	private focusPrevious(): void {
+		const headers = this.getPaneHeaderElements();
+		const index = headers.indexOf(document.activeElement as HTMLElement);
+
+		if (index === -1) {
+			return;
+		}
+
+		headers[Math.max(index - 1, 0)].focus();
+	}
+
+	private focusNext(): void {
+		const headers = this.getPaneHeaderElements();
+		const index = headers.indexOf(document.activeElement as HTMLElement);
+
+		if (index === -1) {
+			return;
+		}
+
+		headers[Math.min(index + 1, headers.length - 1)].focus();
 	}
 
 	override dispose(): void {

@@ -3,41 +3,41 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { isStandalone } from 'vs/base/browser/browser';
 import { alert } from 'vs/base/browser/ui/aria/aria';
 import { createCancelablePromise, raceCancellation } from 'vs/base/common/async';
 import { CancellationToken } from 'vs/base/common/cancellation';
 import { KeyChord, KeyCode, KeyMod } from 'vs/base/common/keyCodes';
 import { isWeb } from 'vs/base/common/platform';
-import { ICodeEditor, isCodeEditor, IActiveCodeEditor } from 'vs/editor/browser/editorBrowser';
+import { assertType } from 'vs/base/common/types';
+import { URI } from 'vs/base/common/uri';
+import { CodeEditorStateFlag, EditorStateCancellationTokenSource } from 'vs/editor/browser/core/editorState';
+import { IActiveCodeEditor, ICodeEditor, isCodeEditor } from 'vs/editor/browser/editorBrowser';
 import { EditorAction, IActionOptions, registerInstantiatedEditorAction, ServicesAccessor } from 'vs/editor/browser/editorExtensions';
 import { ICodeEditorService } from 'vs/editor/browser/services/codeEditorService';
+import { EmbeddedCodeEditorWidget } from 'vs/editor/browser/widget/embeddedCodeEditorWidget';
+import { EditorOption, GoToLocationValues } from 'vs/editor/common/config/editorOptions';
 import * as corePosition from 'vs/editor/common/core/position';
-import { Range, IRange } from 'vs/editor/common/core/range';
+import { IRange, Range } from 'vs/editor/common/core/range';
+import { IEditorAction, ScrollType } from 'vs/editor/common/editorCommon';
 import { EditorContextKeys } from 'vs/editor/common/editorContextKeys';
 import { ITextModel, IWordAtPosition } from 'vs/editor/common/model';
-import { LocationLink, Location, isLocationLink } from 'vs/editor/common/modes';
-import { MessageController } from 'vs/editor/contrib/message/messageController';
-import { PeekContext } from 'vs/editor/contrib/peekView/peekView';
+import { isLocationLink, Location, LocationLink } from 'vs/editor/common/languages';
 import { ReferencesController } from 'vs/editor/contrib/gotoSymbol/peek/referencesController';
 import { ReferencesModel } from 'vs/editor/contrib/gotoSymbol/referencesModel';
+import { ISymbolNavigationService } from 'vs/editor/contrib/gotoSymbol/symbolNavigation';
+import { MessageController } from 'vs/editor/contrib/message/messageController';
+import { PeekContext } from 'vs/editor/contrib/peekView/peekView';
 import * as nls from 'vs/nls';
-import { MenuId, MenuRegistry, ISubmenuItem } from 'vs/platform/actions/common/actions';
+import { ISubmenuItem, MenuId, MenuRegistry } from 'vs/platform/actions/common/actions';
+import { CommandsRegistry, ICommandService } from 'vs/platform/commands/common/commands';
 import { ContextKeyExpr } from 'vs/platform/contextkey/common/contextkey';
+import { TextEditorSelectionRevealType } from 'vs/platform/editor/common/editor';
+import { IInstantiationService } from 'vs/platform/instantiation/common/instantiation';
 import { KeybindingWeight } from 'vs/platform/keybinding/common/keybindingsRegistry';
 import { INotificationService } from 'vs/platform/notification/common/notification';
 import { IEditorProgressService } from 'vs/platform/progress/common/progress';
-import { getDefinitionsAtPosition, getImplementationsAtPosition, getTypeDefinitionsAtPosition, getDeclarationsAtPosition, getReferencesAtPosition } from './goToSymbol';
-import { CommandsRegistry, ICommandService } from 'vs/platform/commands/common/commands';
-import { EditorStateCancellationTokenSource, CodeEditorStateFlag } from 'vs/editor/browser/core/editorState';
-import { ISymbolNavigationService } from 'vs/editor/contrib/gotoSymbol/symbolNavigation';
-import { EditorOption, GoToLocationValues } from 'vs/editor/common/config/editorOptions';
-import { isStandalone } from 'vs/base/browser/browser';
-import { URI } from 'vs/base/common/uri';
-import { IInstantiationService } from 'vs/platform/instantiation/common/instantiation';
-import { ScrollType, IEditorAction } from 'vs/editor/common/editorCommon';
-import { assertType } from 'vs/base/common/types';
-import { EmbeddedCodeEditorWidget } from 'vs/editor/browser/widget/embeddedCodeEditorWidget';
-import { TextEditorSelectionRevealType } from 'vs/platform/editor/common/editor';
+import { getDeclarationsAtPosition, getDefinitionsAtPosition, getImplementationsAtPosition, getReferencesAtPosition, getTypeDefinitionsAtPosition } from './goToSymbol';
 
 
 MenuRegistry.appendMenuItem(MenuId.EditorContext, <ISubmenuItem>{
@@ -63,16 +63,34 @@ function registerGoToAction<T extends EditorAction>(ctor: { new(): T; }): T {
 	return result;
 }
 
-abstract class SymbolNavigationAction extends EditorAction {
+export class SymbolNavigationAnchor {
 
-	private readonly _configuration: SymbolNavigationActionConfig;
+	static is(thing: any): thing is SymbolNavigationAnchor {
+		if (!thing || typeof thing !== 'object') {
+			return false;
+		}
+		if (thing instanceof SymbolNavigationAnchor) {
+			return true;
+		}
+		if (corePosition.Position.isIPosition((<SymbolNavigationAnchor>thing).position) && (<SymbolNavigationAnchor>thing).model) {
+			return true;
+		}
+		return false;
+	}
+
+	constructor(readonly model: ITextModel, readonly position: corePosition.Position) { }
+}
+
+export abstract class SymbolNavigationAction extends EditorAction {
+
+	readonly configuration: SymbolNavigationActionConfig;
 
 	constructor(configuration: SymbolNavigationActionConfig, opts: IActionOptions) {
 		super(opts);
-		this._configuration = configuration;
+		this.configuration = configuration;
 	}
 
-	run(accessor: ServicesAccessor, editor: ICodeEditor): Promise<void> {
+	run(accessor: ServicesAccessor, editor: ICodeEditor, arg?: SymbolNavigationAnchor | unknown): Promise<void> {
 		if (!editor.hasModel()) {
 			return Promise.resolve(undefined);
 		}
@@ -82,11 +100,12 @@ abstract class SymbolNavigationAction extends EditorAction {
 		const symbolNavService = accessor.get(ISymbolNavigationService);
 
 		const model = editor.getModel();
-		const pos = editor.getPosition();
+		const position = editor.getPosition();
+		const anchor = SymbolNavigationAnchor.is(arg) ? arg : new SymbolNavigationAnchor(model, position);
 
 		const cts = new EditorStateCancellationTokenSource(editor, CodeEditorStateFlag.Value | CodeEditorStateFlag.Position);
 
-		const promise = raceCancellation(this._getLocationModel(model, pos, cts.token), cts.token).then(async references => {
+		const promise = raceCancellation(this._getLocationModel(anchor.model, anchor.position, cts.token), cts.token).then(async references => {
 
 			if (!references || cts.token.isCancellationRequested) {
 				return;
@@ -95,7 +114,7 @@ abstract class SymbolNavigationAction extends EditorAction {
 			alert(references.ariaMessage);
 
 			let altAction: IEditorAction | null | undefined;
-			if (references.referenceAt(model.uri, pos)) {
+			if (references.referenceAt(model.uri, position)) {
 				const altActionId = this._getAlternativeCommand(editor);
 				if (altActionId !== this.id && _goToActionIds.has(altActionId)) {
 					altAction = editor.getAction(altActionId);
@@ -106,9 +125,9 @@ abstract class SymbolNavigationAction extends EditorAction {
 
 			if (referenceCount === 0) {
 				// no result -> show message
-				if (!this._configuration.muteMessage) {
-					const info = model.getWordAtPosition(pos);
-					MessageController.get(editor).showMessage(this._getNoResultFoundMessage(info), pos);
+				if (!this.configuration.muteMessage) {
+					const info = model.getWordAtPosition(position);
+					MessageController.get(editor)?.showMessage(this._getNoResultFoundMessage(info), position);
 				}
 			} else if (referenceCount === 1 && altAction) {
 				// already at the only result, run alternative
@@ -141,13 +160,13 @@ abstract class SymbolNavigationAction extends EditorAction {
 	private async _onResult(editorService: ICodeEditorService, symbolNavService: ISymbolNavigationService, editor: IActiveCodeEditor, model: ReferencesModel): Promise<void> {
 
 		const gotoLocation = this._getGoToPreference(editor);
-		if (!(editor instanceof EmbeddedCodeEditorWidget) && (this._configuration.openInPeek || (gotoLocation === 'peek' && model.references.length > 1))) {
+		if (!(editor instanceof EmbeddedCodeEditorWidget) && (this.configuration.openInPeek || (gotoLocation === 'peek' && model.references.length > 1))) {
 			this._openInPeek(editor, model);
 
 		} else {
 			const next = model.firstReference()!;
 			const peek = model.references.length > 1 && gotoLocation === 'gotoAndPeek';
-			const targetEditor = await this._openReference(editor, editorService, next, this._configuration.openToSide, !peek);
+			const targetEditor = await this._openReference(editor, editorService, next, this.configuration.openToSide, !peek);
 			if (peek && targetEditor) {
 				this._openInPeek(targetEditor, model);
 			} else {
@@ -202,9 +221,9 @@ abstract class SymbolNavigationAction extends EditorAction {
 	}
 
 	private _openInPeek(target: ICodeEditor, model: ReferencesModel) {
-		let controller = ReferencesController.get(target);
+		const controller = ReferencesController.get(target);
 		if (controller && target.hasModel()) {
-			controller.toggleWidget(target.getSelection(), createCancelablePromise(_ => Promise.resolve(model)), this._configuration.openInPeek);
+			controller.toggleWidget(target.getSelection(), createCancelablePromise(_ => Promise.resolve(model)), this.configuration.openInPeek);
 		} else {
 			model.dispose();
 		}
@@ -262,12 +281,6 @@ registerGoToAction(class GoToDefinitionAction extends DefinitionAction {
 			contextMenuOpts: {
 				group: 'navigation',
 				order: 1.1
-			},
-			menuOpts: {
-				menuId: MenuId.MenubarGoMenu,
-				group: '4_symbol_nav',
-				order: 2,
-				title: nls.localize({ key: 'miGotoDefinition', comment: ['&& denotes a mnemonic'] }, "Go to &&Definition")
 			}
 		});
 		CommandsRegistry.registerCommandAlias('editor.action.goToDeclaration', GoToDefinitionAction.id);
@@ -292,7 +305,7 @@ registerGoToAction(class OpenDefinitionToSideAction extends DefinitionAction {
 				EditorContextKeys.isInWalkThroughSnippet.toNegated()),
 			kbOpts: {
 				kbExpr: EditorContextKeys.editorTextFocus,
-				primary: KeyChord(KeyMod.CtrlCmd | KeyCode.KEY_K, goToDefinitionKb),
+				primary: KeyChord(KeyMod.CtrlCmd | KeyCode.KeyK, goToDefinitionKb),
 				weight: KeybindingWeight.EditorContrib
 			}
 		});
@@ -380,12 +393,6 @@ registerGoToAction(class GoToDeclarationAction extends DeclarationAction {
 				group: 'navigation',
 				order: 1.3
 			},
-			menuOpts: {
-				menuId: MenuId.MenubarGoMenu,
-				group: '4_symbol_nav',
-				order: 3,
-				title: nls.localize({ key: 'miGotoDeclaration', comment: ['&& denotes a mnemonic'] }, "Go to &&Declaration")
-			},
 		});
 	}
 
@@ -469,12 +476,6 @@ registerGoToAction(class GoToTypeDefinitionAction extends TypeDefinitionAction {
 			contextMenuOpts: {
 				group: 'navigation',
 				order: 1.4
-			},
-			menuOpts: {
-				menuId: MenuId.MenubarGoMenu,
-				group: '4_symbol_nav',
-				order: 3,
-				title: nls.localize({ key: 'miGotoTypeDefinition', comment: ['&& denotes a mnemonic'] }, "Go to &&Type Definition")
 			}
 		});
 	}
@@ -552,12 +553,6 @@ registerGoToAction(class GoToImplementationAction extends ImplementationAction {
 				kbExpr: EditorContextKeys.editorTextFocus,
 				primary: KeyMod.CtrlCmd | KeyCode.F12,
 				weight: KeybindingWeight.EditorContrib
-			},
-			menuOpts: {
-				menuId: MenuId.MenubarGoMenu,
-				group: '4_symbol_nav',
-				order: 4,
-				title: nls.localize({ key: 'miGotoImplementation', comment: ['&& denotes a mnemonic'] }, "Go to &&Implementations")
 			},
 			contextMenuOpts: {
 				group: 'navigation',
@@ -644,13 +639,7 @@ registerGoToAction(class GoToReferencesAction extends ReferencesAction {
 			contextMenuOpts: {
 				group: 'navigation',
 				order: 1.45
-			},
-			menuOpts: {
-				menuId: MenuId.MenubarGoMenu,
-				group: '4_symbol_nav',
-				order: 5,
-				title: nls.localize({ key: 'miGotoReference', comment: ['&& denotes a mnemonic'] }, "Go to &&References")
-			},
+			}
 		});
 	}
 
@@ -702,8 +691,8 @@ class GenericGoToLocationAction extends SymbolNavigationAction {
 	) {
 		super(config, {
 			id: 'editor.action.goToLocation',
-			label: nls.localize('label.generic', "Go To Any Symbol"),
-			alias: 'Go To Any Symbol',
+			label: nls.localize('label.generic', "Go to Any Symbol"),
+			alias: 'Go to Any Symbol',
 			precondition: ContextKeyExpr.and(
 				PeekContext.notInPeekEditor,
 				EditorContextKeys.isInWalkThroughSnippet.toNegated()
@@ -818,3 +807,64 @@ CommandsRegistry.registerCommand({
 CommandsRegistry.registerCommandAlias('editor.action.showReferences', 'editor.action.peekLocations');
 
 //#endregion
+
+// -- unconditionally register goto-action
+
+MenuRegistry.appendMenuItems([
+	{
+		id: MenuId.MenubarGoMenu,
+		item: {
+			command: {
+				id: 'editor.action.revealDefinition',
+				title: nls.localize({ key: 'miGotoDefinition', comment: ['&& denotes a mnemonic'] }, "Go to &&Definition")
+			},
+			group: '4_symbol_nav',
+			order: 2,
+		},
+	},
+	{
+		id: MenuId.MenubarGoMenu,
+		item: {
+			command: {
+				id: 'editor.action.revealDeclaration',
+				title: nls.localize({ key: 'miGotoDeclaration', comment: ['&& denotes a mnemonic'] }, "Go to &&Declaration")
+			},
+			group: '4_symbol_nav',
+			order: 3,
+
+		},
+	},
+	{
+		id: MenuId.MenubarGoMenu,
+		item: {
+			command: {
+				id: 'editor.action.goToTypeDefinition',
+				title: nls.localize({ key: 'miGotoTypeDefinition', comment: ['&& denotes a mnemonic'] }, "Go to &&Type Definition")
+			},
+			group: '4_symbol_nav',
+			order: 3,
+		},
+	},
+	{
+		id: MenuId.MenubarGoMenu,
+		item: {
+			command: {
+				id: 'editor.action.goToImplementation',
+				title: nls.localize({ key: 'miGotoImplementation', comment: ['&& denotes a mnemonic'] }, "Go to &&Implementations")
+			},
+			group: '4_symbol_nav',
+			order: 4,
+		},
+	},
+	{
+		id: MenuId.MenubarGoMenu,
+		item: {
+			command: {
+				id: 'editor.action.goToReferences',
+				title: nls.localize({ key: 'miGotoReference', comment: ['&& denotes a mnemonic'] }, "Go to &&References")
+			},
+			group: '4_symbol_nav',
+			order: 5,
+		},
+	},
+]);

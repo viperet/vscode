@@ -8,7 +8,7 @@ import { joinPath } from 'vs/base/common/resources';
 import { URI } from 'vs/base/common/uri';
 import { generateUuid } from 'vs/base/common/uuid';
 import { IExtensionHostDebugParams } from 'vs/platform/environment/common/environment';
-import { IColorScheme, IPath, IWindowConfiguration } from 'vs/platform/windows/common/windows';
+import { IPath, IWindowConfiguration } from 'vs/platform/windows/common/windows';
 import { IWorkbenchEnvironmentService } from 'vs/workbench/services/environment/common/environmentService';
 import type { IWorkbenchConstructionOptions as IWorkbenchOptions } from 'vs/workbench/workbench.web.api';
 import { IProductService } from 'vs/platform/product/common/productService';
@@ -71,10 +71,6 @@ class BrowserWorkbenchConfiguration implements IWindowConfiguration {
 
 		return undefined;
 	}
-
-	get colorScheme(): IColorScheme {
-		return { dark: false, highContrast: false };
-	}
 }
 
 interface IBrowserWorkbenchOptions extends IWorkbenchOptions {
@@ -131,6 +127,9 @@ export class BrowserWorkbenchEnvironmentService implements IWorkbenchEnvironment
 
 	@memoize
 	get snippetsHome(): URI { return joinPath(this.userRoamingDataHome, 'snippets'); }
+
+	@memoize
+	get cacheHome(): URI { return joinPath(this.userRoamingDataHome, 'caches'); }
 
 	@memoize
 	get globalStorageHome(): URI { return URI.joinPath(this.userRoamingDataHome, 'globalStorage'); }
@@ -234,9 +233,10 @@ export class BrowserWorkbenchEnvironmentService implements IWorkbenchEnvironment
 			|| this.productService.webviewContentExternalBaseUrlTemplate
 			|| 'https://{{uuid}}.vscode-webview.net/{{quality}}/{{commit}}/out/vs/workbench/contrib/webview/browser/pre/';
 
+		const webviewExternalEndpointCommit = this.payload?.get('webviewExternalEndpointCommit');
 		return endpoint
-			.replace('{{commit}}', this.payload?.get('webviewExternalEndpointCommit') ?? this.productService.commit ?? 'a81fff00c9dab105800118fcf8b044cd84620419')
-			.replace('{{quality}}', this.productService.quality || 'insider');
+			.replace('{{commit}}', webviewExternalEndpointCommit ?? this.productService.commit ?? 'd372f9187401bd145a0a6e15ba369e2d82d02005')
+			.replace('{{quality}}', (webviewExternalEndpointCommit ? 'insider' : this.productService.quality) ?? 'insider');
 	}
 
 	@memoize

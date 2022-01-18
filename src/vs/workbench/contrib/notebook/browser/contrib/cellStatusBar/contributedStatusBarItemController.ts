@@ -49,17 +49,17 @@ export class ContributedStatusBarItemController extends Disposable implements IN
 		added: CellViewModel[];
 		removed: { handle: number }[];
 	}): void {
-		const vm = this._notebookEditor.viewModel;
+		const vm = this._notebookEditor._getViewModel();
 		if (!vm) {
 			return;
 		}
 
-		for (let newCell of e.added) {
+		for (const newCell of e.added) {
 			const helper = new CellStatusBarHelper(vm, newCell, this._notebookCellStatusBarService);
 			this._visibleCells.set(newCell.handle, helper);
 		}
 
-		for (let oldCell of e.removed) {
+		for (const oldCell of e.removed) {
 			this._visibleCells.get(oldCell.handle)?.dispose();
 			this._visibleCells.delete(oldCell.handle);
 		}

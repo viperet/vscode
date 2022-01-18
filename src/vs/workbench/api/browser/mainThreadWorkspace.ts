@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { CancellationToken, CancellationTokenSource } from 'vs/base/common/cancellation';
-import { isPromiseCanceledError } from 'vs/base/common/errors';
+import { isCancellationError } from 'vs/base/common/errors';
 import { DisposableStore } from 'vs/base/common/lifecycle';
 import { isNative } from 'vs/base/common/platform';
 import { withNullAsUndefined } from 'vs/base/common/types';
@@ -31,7 +31,7 @@ import { ExtHostContext, ExtHostWorkspaceShape, IExtHostContext, ITextSearchComp
 export class MainThreadWorkspace implements MainThreadWorkspaceShape {
 
 	private readonly _toDispose = new DisposableStore();
-	private readonly _activeCancelTokens: { [id: number]: CancellationTokenSource } = Object.create(null);
+	private readonly _activeCancelTokens: { [id: number]: CancellationTokenSource; } = Object.create(null);
 	private readonly _proxy: ExtHostWorkspaceShape;
 	private readonly _queryBuilder = this._instantiationService.createInstance(QueryBuilder);
 
@@ -54,7 +54,7 @@ export class MainThreadWorkspace implements MainThreadWorkspaceShape {
 		const workspace = this._contextService.getWorkspace();
 		// The workspace file is provided be a unknown file system provider. It might come
 		// from the extension host. So initialize now knowing that `rootPath` is undefined.
-		if (workspace.configuration && !isNative && !fileService.canHandleResource(workspace.configuration)) {
+		if (workspace.configuration && !isNative && !fileService.hasProvider(workspace.configuration)) {
 			this._proxy.$initializeWorkspace(this.getWorkspaceData(workspace), this.isWorkspaceTrusted());
 		} else {
 			this._contextService.getCompleteWorkspace().then(workspace => this._proxy.$initializeWorkspace(this.getWorkspaceData(workspace), this.isWorkspaceTrusted()));
@@ -75,7 +75,7 @@ export class MainThreadWorkspace implements MainThreadWorkspaceShape {
 
 	// --- workspace ---
 
-	$updateWorkspaceFolders(extensionName: string, index: number, deleteCount: number, foldersToAdd: { uri: UriComponents, name?: string }[]): Promise<void> {
+	$updateWorkspaceFolders(extensionName: string, index: number, deleteCount: number, foldersToAdd: { uri: UriComponents, name?: string; }[]): Promise<void> {
 		const workspaceFoldersToAdd = foldersToAdd.map(f => ({ uri: URI.revive(f.uri), name: f.name }));
 
 		// Indicate in status message
@@ -129,7 +129,8 @@ export class MainThreadWorkspace implements MainThreadWorkspaceShape {
 			isUntitled: workspace.configuration ? isUntitledWorkspace(workspace.configuration, this._environmentService) : false,
 			folders: workspace.folders,
 			id: workspace.id,
-			name: this._labelService.getWorkspaceLabel(workspace)
+			name: this._labelService.getWorkspaceLabel(workspace),
+			transient: workspace.transient
 		};
 	}
 
@@ -157,7 +158,7 @@ export class MainThreadWorkspace implements MainThreadWorkspaceShape {
 		return this._searchService.fileSearch(query, token).then(result => {
 			return result.results.map(m => m.resource);
 		}, err => {
-			if (!isPromiseCanceledError(err)) {
+			if (!isCancellationError(err)) {
 				return Promise.reject(err);
 			}
 			return null;
@@ -183,7 +184,7 @@ export class MainThreadWorkspace implements MainThreadWorkspaceShape {
 				return { limitHit: result.limitHit };
 			},
 			err => {
-				if (!isPromiseCanceledError(err)) {
+				if (!isCancellationError(err)) {
 					return Promise.reject(err);
 				}
 

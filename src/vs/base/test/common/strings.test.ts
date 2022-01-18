@@ -208,24 +208,6 @@ suite('Strings', () => {
 		assert.strictEqual(strings.containsRTL('זוהי עובדה מבוססת שדעתו'), true);
 	});
 
-	test('containsEmoji', () => {
-		assert.strictEqual(strings.containsEmoji('a'), false);
-		assert.strictEqual(strings.containsEmoji(''), false);
-		assert.strictEqual(strings.containsEmoji(strings.UTF8_BOM_CHARACTER + 'a'), false);
-		assert.strictEqual(strings.containsEmoji('hello world!'), false);
-		assert.strictEqual(strings.containsEmoji('هناك حقيقة مثبتة منذ زمن طويل'), false);
-		assert.strictEqual(strings.containsEmoji('זוהי עובדה מבוססת שדעתו'), false);
-
-		assert.strictEqual(strings.containsEmoji('a📚📚b'), true);
-		assert.strictEqual(strings.containsEmoji('1F600 # 😀 grinning face'), true);
-		assert.strictEqual(strings.containsEmoji('1F47E # 👾 alien monster'), true);
-		assert.strictEqual(strings.containsEmoji('1F467 1F3FD # 👧🏽 girl: medium skin tone'), true);
-		assert.strictEqual(strings.containsEmoji('26EA # ⛪ church'), true);
-		assert.strictEqual(strings.containsEmoji('231B # ⌛ hourglass'), true);
-		assert.strictEqual(strings.containsEmoji('2702 # ✂ scissors'), true);
-		assert.strictEqual(strings.containsEmoji('1F1F7 1F1F4  # 🇷🇴 Romania'), true);
-	});
-
 	test('issue #115221: isEmojiImprecise misses ⭐', () => {
 		const codePoint = strings.getNextCodePoint('⭐', '⭐'.length, 0);
 		assert.strictEqual(strings.isEmojiImprecise(codePoint), true);
@@ -394,40 +376,6 @@ suite('Strings', () => {
 		assert.strictEqual(strings.getNLines('foo\nbar'), 'foo');
 		assert.strictEqual(strings.getNLines('foo\nbar\nsomething', 2), 'foo\nbar');
 		assert.strictEqual(strings.getNLines('foo', 0), '');
-	});
-
-	test('encodeUTF8', function () {
-		function assertEncodeUTF8(str: string, expected: number[]): void {
-			const actual = strings.encodeUTF8(str);
-			const actualArr: number[] = [];
-			for (let offset = 0; offset < actual.byteLength; offset++) {
-				actualArr[offset] = actual[offset];
-			}
-			assert.deepStrictEqual(actualArr, expected);
-		}
-
-		function assertDecodeUTF8(data: number[], expected: string): void {
-			const actual = strings.decodeUTF8(new Uint8Array(data));
-			assert.deepStrictEqual(actual, expected);
-		}
-
-		function assertEncodeDecodeUTF8(str: string, buff: number[]): void {
-			assertEncodeUTF8(str, buff);
-			assertDecodeUTF8(buff, str);
-		}
-
-		assertEncodeDecodeUTF8('\u0000', [0]);
-		assertEncodeDecodeUTF8('!', [33]);
-		assertEncodeDecodeUTF8('\u007F', [127]);
-		assertEncodeDecodeUTF8('\u0080', [194, 128]);
-		assertEncodeDecodeUTF8('Ɲ', [198, 157]);
-		assertEncodeDecodeUTF8('\u07FF', [223, 191]);
-		assertEncodeDecodeUTF8('\u0800', [224, 160, 128]);
-		assertEncodeDecodeUTF8('ஂ', [224, 174, 130]);
-		assertEncodeDecodeUTF8('\uffff', [239, 191, 191]);
-		assertEncodeDecodeUTF8('\u10000', [225, 128, 128, 48]);
-		assertEncodeDecodeUTF8('🧝', [240, 159, 167, 157]);
-
 	});
 
 	test('getGraphemeBreakType', () => {

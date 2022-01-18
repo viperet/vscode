@@ -13,7 +13,7 @@ import { ICommandService } from 'vs/platform/commands/common/commands';
 import { matchesFuzzy } from 'vs/base/common/filters';
 import { withNullAsUndefined } from 'vs/base/common/types';
 import { ADD_CONFIGURATION_ID } from 'vs/workbench/contrib/debug/browser/debugCommands';
-import { debugConfigure } from 'vs/workbench/contrib/debug/browser/debugIcons';
+import { debugConfigure, debugRemoveConfig } from 'vs/workbench/contrib/debug/browser/debugIcons';
 import { ThemeIcon } from 'vs/platform/theme/common/themeService';
 
 export class StartDebugQuickAccessProvider extends PickerQuickAccessProvider<IPickerQuickAccessItem> {
@@ -35,7 +35,7 @@ export class StartDebugQuickAccessProvider extends PickerQuickAccessProvider<IPi
 
 	protected async _getPicks(filter: string): Promise<(IQuickPickSeparator | IPickerQuickAccessItem)[]> {
 		const picks: Array<IPickerQuickAccessItem | IQuickPickSeparator> = [];
-		if (!this.debugService.getAdapterManager().hasDebuggers()) {
+		if (!this.debugService.getAdapterManager().hasEnabledDebuggers()) {
 			return [];
 		}
 
@@ -45,7 +45,7 @@ export class StartDebugQuickAccessProvider extends PickerQuickAccessProvider<IPi
 
 		// Entries: configs
 		let lastGroup: string | undefined;
-		for (let config of configManager.getAllConfigurations()) {
+		for (const config of configManager.getAllConfigurations()) {
 			const highlights = matchesFuzzy(filter, config.name, true);
 			if (highlights) {
 
@@ -72,7 +72,7 @@ export class StartDebugQuickAccessProvider extends PickerQuickAccessProvider<IPi
 					accept: async () => {
 						await configManager.selectConfiguration(config.launch, config.name);
 						try {
-							await this.debugService.startDebugging(config.launch);
+							await this.debugService.startDebugging(config.launch, undefined, { startedByUser: true });
 						} catch (error) {
 							this.notificationService.error(error);
 						}
@@ -98,12 +98,20 @@ export class StartDebugQuickAccessProvider extends PickerQuickAccessProvider<IPi
 				picks.push({
 					label: name,
 					highlights: { label: highlights },
+					buttons: [{
+						iconClass: ThemeIcon.asClassName(debugRemoveConfig),
+						tooltip: localize('removeLaunchConfig', "Remove Launch Configuration")
+					}],
+					trigger: () => {
+						configManager.removeRecentDynamicConfigurations(name, type);
+						return TriggerAction.CLOSE_PICKER;
+					},
 					accept: async () => {
 						await configManager.selectConfiguration(undefined, name, undefined, { type });
 						try {
 							const { launch, getConfig } = configManager.selectedConfiguration;
 							const config = await getConfig();
-							await this.debugService.startDebugging(launch, config);
+							await this.debugService.startDebugging(launch, config, { startedByUser: true });
 						} catch (error) {
 							this.notificationService.error(error);
 						}
@@ -121,7 +129,7 @@ export class StartDebugQuickAccessProvider extends PickerQuickAccessProvider<IPi
 					if (pick) {
 						// Use the type of the provider, not of the config since config sometimes have subtypes (for example "node-terminal")
 						await configManager.selectConfiguration(pick.launch, pick.config.name, pick.config, { type: provider.type });
-						this.debugService.startDebugging(pick.launch, pick.config);
+						this.debugService.startDebugging(pick.launch, pick.config, { startedByUser: true });
 					}
 				}
 			});

@@ -6,6 +6,7 @@
 import { MainThreadTunnelServiceShape, MainContext, PortAttributesProviderSelector } from 'vs/workbench/api/common/extHost.protocol';
 import { IExtHostRpcService } from 'vs/workbench/api/common/extHostRpcService';
 import type * as vscode from 'vscode';
+import * as nls from 'vs/nls';
 import { Disposable, IDisposable, toDisposable } from 'vs/base/common/lifecycle';
 import { IExtHostInitDataService } from 'vs/workbench/api/common/extHostInitDataService';
 import { URI } from 'vs/base/common/uri';
@@ -282,7 +283,7 @@ export class ExtHostTunnelService extends Disposable implements IExtHostTunnelSe
 		}
 	}
 
-	async setTunnelExtensionFunctions(provider: vscode.RemoteAuthorityResolver | undefined): Promise<IDisposable> {
+	async setTunnelFactory(provider: vscode.RemoteAuthorityResolver | undefined): Promise<IDisposable> {
 		// Do not wait for any of the proxy promises here.
 		// It will delay startup and there is nothing that needs to be waited for.
 		if (provider) {
@@ -295,10 +296,29 @@ export class ExtHostTunnelService extends Disposable implements IExtHostTunnelSe
 			}
 			if (provider.tunnelFactory) {
 				this._forwardPortProvider = provider.tunnelFactory;
-				this._proxy.$setTunnelProvider(provider.tunnelFeatures ?? {
-					elevation: false,
-					public: false
-				});
+				let privacyOptions = provider.tunnelFeatures?.privacyOptions ?? [];
+				if (provider.tunnelFeatures?.public && (privacyOptions.length === 0)) {
+					privacyOptions = [
+						{
+							id: 'private',
+							label: nls.localize('tunnelPrivacy.private', "Private"),
+							themeIcon: 'lock'
+						},
+						{
+							id: 'public',
+							label: nls.localize('tunnelPrivacy.public', "Public"),
+							themeIcon: 'eye'
+						}
+					];
+				}
+
+				const tunnelFeatures = provider.tunnelFeatures ? {
+					elevation: !!provider.tunnelFeatures?.elevation,
+					public: !!provider.tunnelFeatures?.public,
+					privacyOptions
+				} : undefined;
+
+				this._proxy.$setTunnelProvider(tunnelFeatures);
 			}
 		} else {
 			this._forwardPortProvider = undefined;

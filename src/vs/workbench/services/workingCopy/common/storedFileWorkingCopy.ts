@@ -203,27 +203,27 @@ export interface IStoredFileWorkingCopySaveOptions extends ISaveOptions {
 	/**
 	 * Save the stored file working copy with an attempt to unlock it.
 	 */
-	writeUnlock?: boolean;
+	readonly writeUnlock?: boolean;
 
 	/**
 	 * Save the stored file working copy with elevated privileges.
 	 *
 	 * Note: This may not be supported in all environments.
 	 */
-	writeElevated?: boolean;
+	readonly writeElevated?: boolean;
 
 	/**
 	 * Allows to write to a stored file working copy even if it has been
 	 * modified on disk. This should only be triggered from an
 	 * explicit user action.
 	 */
-	ignoreModifiedSince?: boolean;
+	readonly ignoreModifiedSince?: boolean;
 
 	/**
 	 * If set, will bubble up the stored file working copy save error to
 	 * the caller instead of handling it.
 	 */
-	ignoreErrorHandler?: boolean;
+	readonly ignoreErrorHandler?: boolean;
 }
 
 export interface IStoredFileWorkingCopyResolveOptions {
@@ -236,23 +236,23 @@ export interface IStoredFileWorkingCopyResolveOptions {
 	 * If contents are provided, the stored file working copy will be marked
 	 * as dirty right from the beginning.
 	 */
-	contents?: VSBufferReadableStream;
+	readonly contents?: VSBufferReadableStream;
 
 	/**
 	 * Go to disk bypassing any cache of the stored file working copy if any.
 	 */
-	forceReadFromFile?: boolean;
+	readonly forceReadFromFile?: boolean;
 }
 
 /**
  * Metadata associated with a stored file working copy backup.
  */
 interface IStoredFileWorkingCopyBackupMetaData extends IWorkingCopyBackupMeta {
-	mtime: number;
-	ctime: number;
-	size: number;
-	etag: string;
-	orphaned: boolean;
+	readonly mtime: number;
+	readonly ctime: number;
+	readonly size: number;
+	readonly etag: string;
+	readonly orphaned: boolean;
 }
 
 export class StoredFileWorkingCopy<M extends IStoredFileWorkingCopyModel> extends ResourceWorkingCopy implements IStoredFileWorkingCopy<M>  {
@@ -764,7 +764,7 @@ export class StoredFileWorkingCopy<M extends IStoredFileWorkingCopyModel> extend
 		await this.doSave(options);
 		this.trace('[stored file working copy] save() - exit');
 
-		return true;
+		return this.hasState(StoredFileWorkingCopyState.SAVED);
 	}
 
 	private async doSave(options: IStoredFileWorkingCopySaveOptions): Promise<void> {
@@ -1164,8 +1164,8 @@ export class StoredFileWorkingCopy<M extends IStoredFileWorkingCopyModel> extend
 		}
 	}
 
-	joinState(state: StoredFileWorkingCopyState.PENDING_SAVE): Promise<void> {
-		return this.saveSequentializer.pending ?? Promise.resolve();
+	async joinState(state: StoredFileWorkingCopyState.PENDING_SAVE): Promise<void> {
+		return this.saveSequentializer.pending;
 	}
 
 	//#endregion

@@ -272,21 +272,7 @@ export type Dto<T> = T extends { toJSON(): infer U }
 	? { [k in keyof T]: Dto<T[k]>; }
 	: T;
 
-export function NotImplementedProxy<T>(name: string): { new(): T } {
-	return <any>class {
-		constructor() {
-			return new Proxy({}, {
-				get(target: any, prop: PropertyKey) {
-					if (target[prop]) {
-						return target[prop];
-					}
-					throw new Error(`Not Implemented: ${name}->${String(prop)}`);
-				}
-			});
-		}
-	};
-}
 
-export function assertNever(value: never, message = 'Unreachable') {
+export function assertNever(value: never, message = 'Unreachable'): never {
 	throw new Error(message);
 }

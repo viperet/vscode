@@ -20,6 +20,7 @@ import { INotebookService } from 'vs/workbench/contrib/notebook/common/notebookS
 import { IEditorGroupsService } from 'vs/workbench/services/editor/common/editorGroupsService';
 import { IEditorService } from 'vs/workbench/services/editor/common/editorService';
 import { ExtHostContext, ExtHostNotebookShape, IExtHostContext, INotebookDocumentsAndEditorsDelta, INotebookEditorAddData, INotebookModelAddedData, MainContext } from '../common/extHost.protocol';
+import { SerializableObjectWithBuffers } from 'vs/workbench/services/extensions/common/proxyIdentifier';
 
 interface INotebookAndEditorDelta {
 	removedDocuments: URI[];
@@ -130,7 +131,7 @@ export class MainThreadNotebooksAndEditors {
 	private _handleEditorAdd(editor: INotebookEditor): void {
 		this._editorListeners.set(editor.getId(), combinedDisposable(
 			editor.onDidChangeModel(() => this._updateState()),
-			editor.onDidFocusEditorWidget(() => this._updateState(editor)),
+			editor.onDidFocusWidget(() => this._updateState(editor)),
 		));
 		this._updateState();
 	}
@@ -190,7 +191,7 @@ export class MainThreadNotebooksAndEditors {
 		};
 
 		// send to extension FIRST
-		this._proxy.$acceptDocumentAndEditorsDelta(dto);
+		this._proxy.$acceptDocumentAndEditorsDelta(new SerializableObjectWithBuffers(dto));
 
 		// handle internally
 		this._onDidRemoveEditors.fire(delta.removedEditors);

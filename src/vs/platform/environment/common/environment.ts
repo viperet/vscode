@@ -18,6 +18,7 @@ export interface IDebugParams {
 
 export interface IExtensionHostDebugParams extends IDebugParams {
 	debugId?: string;
+	env?: Record<string, string>;
 }
 
 /**
@@ -52,6 +53,7 @@ export interface IEnvironmentService {
 	untitledWorkspacesHome: URI;
 	globalStorageHome: URI;
 	workspaceStorageHome: URI;
+	cacheHome: URI;
 
 	// --- settings sync
 	userDataSyncHome: URI;
@@ -66,9 +68,6 @@ export interface IEnvironmentService {
 	extensionDevelopmentLocationURI?: URI[];
 	extensionDevelopmentKind?: ExtensionKind[];
 	extensionTestsLocationURI?: URI;
-
-	// --- workspace trust
-	disableWorkspaceTrust: boolean;
 
 	// --- logging
 	logsPath: string;
@@ -128,6 +127,9 @@ export interface INativeEnvironmentService extends IEnvironmentService {
 
 	// --- smoke test support
 	driverHandle?: string;
+
+	// --- use keytar for credentials
+	disableKeytar?: boolean;
 
 	// !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 	//

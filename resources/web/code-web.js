@@ -37,7 +37,7 @@ const ALLOWED_CORS_ORIGINS = [
 	'http://127.0.0.1:8080',
 ];
 
-const WEB_PLAYGROUND_VERSION = '0.0.12';
+const WEB_PLAYGROUND_VERSION = '0.0.13';
 
 const args = minimist(process.argv, {
 	boolean: [
@@ -62,14 +62,13 @@ const args = minimist(process.argv, {
 if (args.help) {
 	console.log(
 		'yarn web [options]\n' +
-		' --no-launch      Do not open VSCode web in the browser\n' +
+		' --no-launch      Do not open Code in the browser\n' +
 		' --wrap-iframe    Wrap the Web Worker Extension Host in an iframe\n' +
 		' --enable-sync    Enable sync by default\n' +
 		' --scheme         Protocol (https or http)\n' +
 		' --host           Remote host\n' +
 		' --port           Remote/Local port\n' +
 		' --local_port     Local port override\n' +
-		' --secondary-port Secondary port\n' +
 		' --extension      Path of an extension to include\n' +
 		' --extensionId    Id of an extension to include\n' +
 		' --open-file      uri of the file to open. Also support selections in the file. Eg: scheme://authority/path#L1:2-L10:3\n' +
@@ -84,7 +83,6 @@ if (args.help) {
 
 const PORT = args.port || process.env.PORT || 8080;
 const LOCAL_PORT = args.local_port || process.env.LOCAL_PORT || PORT;
-const SECONDARY_PORT = args['secondary-port'] || (parseInt(PORT, 10) + 1);
 const SCHEME = args.scheme || process.env.VSCODE_SCHEME || 'http';
 const HOST = args.host || 'localhost';
 const AUTHORITY = process.env.VSCODE_AUTHORITY || `${HOST}:${PORT}`;
@@ -239,8 +237,8 @@ const requestHandler = (req, res) => {
 			// manifest
 			res.writeHead(200, { 'Content-Type': 'application/json' });
 			return res.end(JSON.stringify({
-				'name': 'Code Web - OSS',
-				'short_name': 'Code Web - OSS',
+				'name': 'Code - OSS',
+				'short_name': 'Code - OSS',
 				'start_url': '/',
 				'lang': 'en-US',
 				'display': 'standalone'
@@ -284,15 +282,6 @@ server.listen(LOCAL_PORT, () => {
 	console.log(`Web UI available at           ${SCHEME}://${AUTHORITY}`);
 });
 server.on('error', err => {
-	console.error(`Error occurred in server:`);
-	console.error(err);
-});
-
-const secondaryServer = http.createServer(requestHandler);
-secondaryServer.listen(SECONDARY_PORT, () => {
-	console.log(`Secondary server available at ${SCHEME}://${HOST}:${SECONDARY_PORT}`);
-});
-secondaryServer.on('error', err => {
 	console.error(`Error occurred in server:`);
 	console.error(err);
 });
@@ -417,11 +406,6 @@ async function handleRoot(req, res) {
 		fancyLog(`${ansiColors.magenta('Additional extensions')}: ${additionalBuiltinExtensions.map(e => typeof e === 'string' ? e : path.basename(e.path)).join(', ') || 'None'}`);
 	}
 
-	const secondaryHost = (
-		req.headers['host']
-			? req.headers['host'].replace(':' + PORT, ':' + SECONDARY_PORT)
-			: `${HOST}:${SECONDARY_PORT}`
-	);
 	const openFileUrl = args['open-file'] ? url.parse(args['open-file'], true) : undefined;
 	let selection;
 	if (openFileUrl?.hash) {
@@ -436,7 +420,6 @@ async function handleRoot(req, res) {
 	const webConfigJSON = {
 		folderUri: folderUri,
 		additionalBuiltinExtensions,
-		webWorkerExtensionHostIframeSrc: `${SCHEME}://${secondaryHost}/static/out/vs/workbench/services/extensions/worker/httpWebWorkerExtensionHostIframe.html`,
 		defaultLayout: openFileUrl ? {
 			force: true,
 			editors: [{
@@ -454,10 +437,6 @@ async function handleRoot(req, res) {
 	};
 	if (args['wrap-iframe']) {
 		webConfigJSON._wrapWebWorkerExtHostInIframe = true;
-	}
-	if (req.headers['x-forwarded-host']) {
-		// support for running in codespace => no iframe wrapping
-		delete webConfigJSON.webWorkerExtensionHostIframeSrc;
 	}
 
 	const authSessionInfo = args['github-auth'] ? {

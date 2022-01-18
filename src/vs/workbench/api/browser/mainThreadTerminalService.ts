@@ -4,22 +4,24 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { DisposableStore, Disposable, IDisposable } from 'vs/base/common/lifecycle';
-import { ExtHostContext, ExtHostTerminalServiceShape, MainThreadTerminalServiceShape, MainContext, IExtHostContext, TerminalLaunchConfig, ITerminalDimensionsDto, TerminalIdentifier } from 'vs/workbench/api/common/extHost.protocol';
+import { ExtHostContext, ExtHostTerminalServiceShape, MainThreadTerminalServiceShape, MainContext, IExtHostContext, TerminalLaunchConfig, ITerminalDimensionsDto, ExtHostTerminalIdentifier } from 'vs/workbench/api/common/extHost.protocol';
 import { extHostNamedCustomer } from 'vs/workbench/api/common/extHostCustomers';
 import { URI } from 'vs/base/common/uri';
 import { StopWatch } from 'vs/base/common/stopwatch';
 import { IInstantiationService } from 'vs/platform/instantiation/common/instantiation';
 import { ILogService } from 'vs/platform/log/common/log';
-import { IShellLaunchConfig, IShellLaunchConfigDto, ITerminalDimensions, TerminalLocation, TitleEventSource } from 'vs/platform/terminal/common/terminal';
+import { IProcessProperty, IShellLaunchConfig, IShellLaunchConfigDto, ProcessPropertyType, TerminalLocation, TitleEventSource } from 'vs/platform/terminal/common/terminal';
 import { TerminalDataBufferer } from 'vs/platform/terminal/common/terminalDataBuffering';
 import { ITerminalEditorService, ITerminalExternalLinkProvider, ITerminalGroupService, ITerminalInstance, ITerminalInstanceService, ITerminalLink, ITerminalService } from 'vs/workbench/contrib/terminal/browser/terminal';
 import { TerminalProcessExtHostProxy } from 'vs/workbench/contrib/terminal/browser/terminalProcessExtHostProxy';
 import { IEnvironmentVariableService, ISerializableEnvironmentVariableCollection } from 'vs/workbench/contrib/terminal/common/environmentVariable';
 import { deserializeEnvironmentVariableCollection, serializeEnvironmentVariableCollection } from 'vs/workbench/contrib/terminal/common/environmentVariableShared';
-import { IStartExtensionTerminalRequest, ITerminalProcessExtHostProxy, ITerminalProfileResolverService } from 'vs/workbench/contrib/terminal/common/terminal';
+import { IStartExtensionTerminalRequest, ITerminalProcessExtHostProxy, ITerminalProfileResolverService, ITerminalProfileService } from 'vs/workbench/contrib/terminal/common/terminal';
 import { IRemoteAgentService } from 'vs/workbench/services/remote/common/remoteAgentService';
 import { withNullAsUndefined } from 'vs/base/common/types';
 import { OperatingSystem, OS } from 'vs/base/common/platform';
+import { TerminalEditorLocationOptions } from 'vscode';
+import { Promises } from 'vs/base/common/async';
 
 @extHostNamedCustomer(MainContext.MainThreadTerminalService)
 export class MainThreadTerminalService implements MainThreadTerminalServiceShape {
@@ -55,7 +57,8 @@ export class MainThreadTerminalService implements MainThreadTerminalServiceShape
 		@ITerminalProfileResolverService private readonly _terminalProfileResolverService: ITerminalProfileResolverService,
 		@IRemoteAgentService remoteAgentService: IRemoteAgentService,
 		@ITerminalGroupService private readonly _terminalGroupService: ITerminalGroupService,
-		@ITerminalEditorService private readonly _terminalEditorService: ITerminalEditorService
+		@ITerminalEditorService private readonly _terminalEditorService: ITerminalEditorService,
+		@ITerminalProfileService private readonly _terminalProfileService: ITerminalProfileService
 	) {
 		this._proxy = _extHostContext.getProxy(ExtHostContext.ExtHostTerminalService);
 
@@ -72,6 +75,7 @@ export class MainThreadTerminalService implements MainThreadTerminalServiceShape
 		this._toDispose.add(_terminalService.onDidRequestStartExtensionTerminal(e => this._onRequestStartExtensionTerminal(e)));
 		this._toDispose.add(_terminalService.onDidChangeActiveInstance(instance => this._onActiveTerminalChanged(instance ? instance.instanceId : null)));
 		this._toDispose.add(_terminalService.onDidChangeInstanceTitle(instance => instance && this._onTitleChanged(instance.instanceId, instance.title)));
+		this._toDispose.add(_terminalService.onDidInputInstanceData(instance => this._proxy.$acceptTerminalInteraction(instance.instanceId)));
 
 		// Set initial ext host state
 		this._terminalService.instances.forEach(t => {
@@ -94,7 +98,7 @@ export class MainThreadTerminalService implements MainThreadTerminalServiceShape
 			this._os = env?.os || OS;
 			this._updateDefaultProfile();
 		});
-		this._terminalService.onDidChangeAvailableProfiles(() => this._updateDefaultProfile());
+		this._terminalProfileService.onDidChangeAvailableProfiles(() => this._updateDefaultProfile());
 	}
 
 	public dispose(): void {
@@ -109,7 +113,7 @@ export class MainThreadTerminalService implements MainThreadTerminalServiceShape
 		this._proxy.$acceptDefaultProfile(...await Promise.all([defaultProfile, defaultAutomationProfile]));
 	}
 
-	private async _getTerminalInstance(id: TerminalIdentifier): Promise<ITerminalInstance | undefined> {
+	private async _getTerminalInstance(id: ExtHostTerminalIdentifier): Promise<ITerminalInstance | undefined> {
 		if (typeof id === 'string') {
 			return this._extHostTerminals.get(id);
 		}
@@ -136,27 +140,29 @@ export class MainThreadTerminalService implements MainThreadTerminalServiceShape
 			extHostTerminalId,
 			isFeatureTerminal: launchConfig.isFeatureTerminal,
 			isExtensionOwnedTerminal: launchConfig.isExtensionOwnedTerminal,
-			useShellEnvironment: launchConfig.useShellEnvironment
+			useShellEnvironment: launchConfig.useShellEnvironment,
+			disablePersistence: launchConfig.disablePersistence
 		};
-		this._extHostTerminals.set(extHostTerminalId, new Promise(async r => {
-			let terminal: ITerminalInstance | undefined;
-			if (launchConfig.isSplitTerminal) {
-				const activeInstance = this._terminalService.getInstanceHost(launchConfig.target).activeInstance;
-				if (activeInstance) {
-					terminal = withNullAsUndefined(await this._terminalService.createTerminal({ instanceToSplit: activeInstance, config: shellLaunchConfig }));
-				}
-			}
-			if (!terminal) {
-				terminal = await this._terminalService.createTerminal({
-					config: shellLaunchConfig,
-					target: launchConfig.target
-				});
-			}
+		const terminal = Promises.withAsyncBody<ITerminalInstance>(async r => {
+			const terminal = await this._terminalService.createTerminal({
+				config: shellLaunchConfig,
+				location: await this._deserializeParentTerminal(launchConfig.location)
+			});
 			r(terminal);
-		}));
+		});
+		this._extHostTerminals.set(extHostTerminalId, terminal);
+		await terminal;
 	}
 
-	public async $show(id: TerminalIdentifier, preserveFocus: boolean): Promise<void> {
+	private async _deserializeParentTerminal(location?: TerminalLocation | TerminalEditorLocationOptions | { parentTerminal: ExtHostTerminalIdentifier } | { splitActiveTerminal: boolean, location?: TerminalLocation }): Promise<TerminalLocation | TerminalEditorLocationOptions | { parentTerminal: ITerminalInstance } | { splitActiveTerminal: boolean } | undefined> {
+		if (typeof location === 'object' && 'parentTerminal' in location) {
+			const parentTerminal = await this._extHostTerminals.get(location.parentTerminal.toString());
+			return parentTerminal ? { parentTerminal } : undefined;
+		}
+		return location;
+	}
+
+	public async $show(id: ExtHostTerminalIdentifier, preserveFocus: boolean): Promise<void> {
 		const terminalInstance = await this._getTerminalInstance(id);
 		if (terminalInstance) {
 			this._terminalService.setActiveInstance(terminalInstance);
@@ -168,7 +174,7 @@ export class MainThreadTerminalService implements MainThreadTerminalServiceShape
 		}
 	}
 
-	public async $hide(id: TerminalIdentifier): Promise<void> {
+	public async $hide(id: ExtHostTerminalIdentifier): Promise<void> {
 		const instanceToHide = await this._getTerminalInstance(id);
 		const activeInstance = this._terminalService.activeInstance;
 		if (activeInstance && activeInstance.instanceId === instanceToHide?.instanceId && activeInstance.target !== TerminalLocation.Editor) {
@@ -176,13 +182,17 @@ export class MainThreadTerminalService implements MainThreadTerminalServiceShape
 		}
 	}
 
-	public async $dispose(id: TerminalIdentifier): Promise<void> {
+	public async $dispose(id: ExtHostTerminalIdentifier): Promise<void> {
 		(await this._getTerminalInstance(id))?.dispose();
 	}
 
-	public async $sendText(id: TerminalIdentifier, text: string, addNewLine: boolean): Promise<void> {
+	public async $sendText(id: ExtHostTerminalIdentifier, text: string, addNewLine: boolean): Promise<void> {
 		const instance = await this._getTerminalInstance(id);
 		await instance?.sendText(text, addNewLine);
+	}
+
+	public $sendProcessExit(terminalId: number, exitCode: number | undefined): void {
+		this._terminalProcessProxies.get(terminalId)?.emitExit(exitCode);
 	}
 
 	public $startSendingDataEvents(): void {
@@ -218,7 +228,7 @@ export class MainThreadTerminalService implements MainThreadTerminalServiceShape
 
 	public $registerProfileProvider(id: string, extensionIdentifier: string): void {
 		// Proxy profile provider requests through the extension host
-		this._profileProviders.set(id, this._terminalService.registerTerminalProfileProvider(extensionIdentifier, id, {
+		this._profileProviders.set(id, this._terminalProfileService.registerTerminalProfileProvider(extensionIdentifier, id, {
 			createContributedTerminalProfile: async (options) => {
 				return this._proxy.$createContributedProfileTerminal(id, options);
 			}
@@ -274,7 +284,6 @@ export class MainThreadTerminalService implements MainThreadTerminalServiceShape
 		this._proxy.$acceptTerminalMaximumDimensions(instance.instanceId, instance.maxCols, instance.maxRows);
 	}
 
-
 	private _onRequestStartExtensionTerminal(request: IStartExtensionTerminalRequest): void {
 		const proxy = request.proxy;
 		this._terminalProcessProxies.set(proxy.instanceId, proxy);
@@ -298,18 +307,6 @@ export class MainThreadTerminalService implements MainThreadTerminalServiceShape
 		proxy.onRequestLatency(() => this._onRequestLatency(proxy.instanceId));
 	}
 
-	public $sendProcessTitle(terminalId: number, title: string): void {
-		// Since title events can only come from vscode.Pseudoterminals right now, these are routed
-		// directly to the instance as API source events such that they will replace the initial
-		// `name` property provided for the Pseudoterminal. If we support showing both Api and
-		// Process titles at the same time we may want to pass this through as a Process source
-		// event.
-		const instance = this._terminalService.getInstanceFromId(terminalId);
-		if (instance) {
-			instance.setTitle(title, TitleEventSource.Api);
-		}
-	}
-
 	public $sendProcessData(terminalId: number, data: string): void {
 		this._terminalProcessProxies.get(terminalId)?.emitData(data);
 	}
@@ -318,24 +315,14 @@ export class MainThreadTerminalService implements MainThreadTerminalServiceShape
 		this._terminalProcessProxies.get(terminalId)?.emitReady(pid, cwd);
 	}
 
-	public $sendProcessExit(terminalId: number, exitCode: number | undefined): void {
-		this._terminalProcessProxies.get(terminalId)?.emitExit(exitCode);
-	}
-
-	public $sendOverrideDimensions(terminalId: number, dimensions: ITerminalDimensions | undefined): void {
-		this._terminalProcessProxies.get(terminalId)?.emitOverrideDimensions(dimensions);
-	}
-
-	public $sendProcessInitialCwd(terminalId: number, initialCwd: string): void {
-		this._terminalProcessProxies.get(terminalId)?.emitInitialCwd(initialCwd);
-	}
-
-	public $sendProcessCwd(terminalId: number, cwd: string): void {
-		this._terminalProcessProxies.get(terminalId)?.emitCwd(cwd);
-	}
-
-	public $sendResolvedLaunchConfig(terminalId: number, shellLaunchConfig: IShellLaunchConfig): void {
-		this._getTerminalProcess(terminalId)?.emitResolvedShellLaunchConfig(shellLaunchConfig);
+	public $sendProcessProperty(terminalId: number, property: IProcessProperty<any>): void {
+		if (property.type === ProcessPropertyType.Title) {
+			const instance = this._terminalService.getInstanceFromId(terminalId);
+			if (instance) {
+				instance.refreshTabLabels(property.value, TitleEventSource.Api);
+			}
+		}
+		this._terminalProcessProxies.get(terminalId)?.emitProcessProperty(property);
 	}
 
 	private async _onRequestLatency(terminalId: number): Promise<void> {

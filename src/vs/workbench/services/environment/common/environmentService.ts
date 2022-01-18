@@ -6,6 +6,8 @@
 import { refineServiceDecorator } from 'vs/platform/instantiation/common/instantiation';
 import { IWindowConfiguration } from 'vs/platform/windows/common/windows';
 import { IEnvironmentService } from 'vs/platform/environment/common/environment';
+// TODO@layers
+// eslint-disable-next-line code-import-patterns
 import type { IWorkbenchConstructionOptions as IWorkbenchOptions } from 'vs/workbench/workbench.web.api';
 import { URI } from 'vs/base/common/uri';
 
@@ -41,6 +43,8 @@ export interface IWorkbenchEnvironmentService extends IEnvironmentService {
 	readonly skipWelcome: boolean;
 
 	readonly debugRenderer: boolean;
+
+	readonly disableWorkspaceTrust: boolean;
 
 	/**
 	 * @deprecated this property will go away eventually as it

@@ -5,10 +5,9 @@
 
 import { Codicon } from 'vs/base/common/codicons';
 import { localize } from 'vs/nls';
-import { registerIcon } from 'vs/platform/theme/common/iconRegistry';
+import { registerIcon, spinningLoading } from 'vs/platform/theme/common/iconRegistry';
 import { registerThemingParticipant, ThemeIcon } from 'vs/platform/theme/common/themeService';
-import { TestMessageSeverity } from 'vs/workbench/api/common/extHostTypes';
-import { testingColorRunAction, testMessageSeverityColors, testStatesToIconColors } from 'vs/workbench/contrib/testing/browser/theme';
+import { testingColorRunAction, testStatesToIconColors } from 'vs/workbench/contrib/testing/browser/theme';
 import { TestResultState } from 'vs/workbench/contrib/testing/common/testCollection';
 
 export const testingViewIcon = registerIcon('test-view-icon', Codicon.beaker, localize('testViewIcon', 'View icon of the test view.'));
@@ -26,22 +25,17 @@ export const testingShowAsList = registerIcon('testing-show-as-list-icon', Codic
 export const testingShowAsTree = registerIcon('testing-show-as-list-icon', Codicon.listFlat, localize('testingShowAsTree', 'Icon shown when the test explorer is disabled as a list.'));
 
 export const testingUpdateProfiles = registerIcon('testing-update-profiles', Codicon.gear, localize('testingUpdateProfiles', 'Icon shown to update test profiles.'));
+export const testingRefreshTests = registerIcon('testing-refresh-tests', Codicon.refresh, localize('testingRefreshTests', 'Icon on the button to refresh tests.'));
+export const testingCancelRefreshTests = registerIcon('testing-cancel-refresh-tests', Codicon.stop, localize('testingCancelRefreshTests', 'Icon on the button to cancel refreshing tests.'));
 
 export const testingStatesToIcons = new Map<TestResultState, ThemeIcon>([
 	[TestResultState.Errored, registerIcon('testing-error-icon', Codicon.issues, localize('testingErrorIcon', 'Icon shown for tests that have an error.'))],
 	[TestResultState.Failed, registerIcon('testing-failed-icon', Codicon.error, localize('testingFailedIcon', 'Icon shown for tests that failed.'))],
 	[TestResultState.Passed, registerIcon('testing-passed-icon', Codicon.pass, localize('testingPassedIcon', 'Icon shown for tests that passed.'))],
 	[TestResultState.Queued, registerIcon('testing-queued-icon', Codicon.history, localize('testingQueuedIcon', 'Icon shown for tests that are queued.'))],
-	[TestResultState.Running, ThemeIcon.modify(Codicon.loading, 'spin')],
+	[TestResultState.Running, spinningLoading],
 	[TestResultState.Skipped, registerIcon('testing-skipped-icon', Codicon.debugStepOver, localize('testingSkippedIcon', 'Icon shown for tests that are skipped.'))],
 	[TestResultState.Unset, registerIcon('testing-unset-icon', Codicon.circleOutline, localize('testingUnsetIcon', 'Icon shown for tests that are in an unset state.'))],
-]);
-
-export const testMessageSeverityToIcons = new Map<TestMessageSeverity, ThemeIcon>([
-	[TestMessageSeverity.Error, registerIcon('testing-error-message-icon', Codicon.error, localize('testingErrorIcon', 'Icon shown for tests that have an error.'))],
-	[TestMessageSeverity.Warning, registerIcon('testing-warning-message-icon', Codicon.warning, localize('testingErrorIcon', 'Icon shown for tests that have an error.'))],
-	[TestMessageSeverity.Information, registerIcon('testing-info-message-icon', Codicon.info, localize('testingErrorIcon', 'Icon shown for tests that have an error.'))],
-	[TestMessageSeverity.Hint, registerIcon('testing-hint-message-icon', Codicon.question, localize('testingErrorIcon', 'Icon shown for tests that have an error.'))],
 ]);
 
 registerThemingParticipant((theme, collector) => {
@@ -52,16 +46,6 @@ registerThemingParticipant((theme, collector) => {
 		}
 		collector.addRule(`.monaco-workbench ${ThemeIcon.asCSSSelector(icon)} {
 			color: ${theme.getColor(color)} !important;
-		}`);
-	}
-
-	for (const [state, { decorationForeground }] of Object.entries(testMessageSeverityColors)) {
-		const icon = testMessageSeverityToIcons.get(Number(state));
-		if (!icon) {
-			continue;
-		}
-		collector.addRule(`.monaco-workbench ${ThemeIcon.asCSSSelector(icon)} {
-			color: ${theme.getColor(decorationForeground)} !important;
 		}`);
 	}
 

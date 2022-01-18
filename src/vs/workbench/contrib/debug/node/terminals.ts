@@ -48,14 +48,13 @@ export function runInExternalTerminal(args: DebugProtocol.RunInTerminalRequestAr
 	return externalTerminalService.runInTerminal(args.title!, args.cwd, args.args, args.env || {}, config.external || {});
 }
 
-export function hasChildProcesses(processId: number | undefined): Promise<boolean> {
+export async function hasChildProcesses(processId: number | undefined): Promise<boolean> {
 	if (processId) {
 
 		// if shell has at least one child process, assume that shell is busy
 		if (platform.isWindows) {
-			return new Promise<boolean>(async (resolve) => {
-				// See #123296
-				const windowsProcessTree = await import('windows-process-tree');
+			const windowsProcessTree = await import('windows-process-tree');
+			return new Promise<boolean>(resolve => {
 				windowsProcessTree.getProcessTree(processId, (processTree) => {
 					resolve(processTree.children.length > 0);
 				});
@@ -122,7 +121,7 @@ export function prepareCommand(shell: string, args: string[], cwd?: string, env?
 				command += `cd ${quote(cwd)}; `;
 			}
 			if (env) {
-				for (let key in env) {
+				for (const key in env) {
 					const value = env[key];
 					if (value === null) {
 						command += `Remove-Item env:${key}; `;
@@ -134,7 +133,7 @@ export function prepareCommand(shell: string, args: string[], cwd?: string, env?
 			if (args.length > 0) {
 				const cmd = quote(args.shift()!);
 				command += (cmd[0] === '\'') ? `& ${cmd} ` : `${cmd} `;
-				for (let a of args) {
+				for (const a of args) {
 					command += `${quote(a)} `;
 				}
 			}
@@ -156,7 +155,7 @@ export function prepareCommand(shell: string, args: string[], cwd?: string, env?
 			}
 			if (env) {
 				command += 'cmd /C "';
-				for (let key in env) {
+				for (const key in env) {
 					let value = env[key];
 					if (value === null) {
 						command += `set "${key}=" && `;
@@ -166,7 +165,7 @@ export function prepareCommand(shell: string, args: string[], cwd?: string, env?
 					}
 				}
 			}
-			for (let a of args) {
+			for (const a of args) {
 				command += `${quote(a)} `;
 			}
 			if (env) {
@@ -174,7 +173,7 @@ export function prepareCommand(shell: string, args: string[], cwd?: string, env?
 			}
 			break;
 
-		case ShellType.bash:
+		case ShellType.bash: {
 
 			quote = (s: string) => {
 				s = s.replace(/(["'\\\$])/g, '\\$1');
@@ -190,7 +189,7 @@ export function prepareCommand(shell: string, args: string[], cwd?: string, env?
 			}
 			if (env) {
 				command += '/usr/bin/env';
-				for (let key in env) {
+				for (const key in env) {
 					const value = env[key];
 					if (value === null) {
 						command += ` -u ${hardQuote(key)}`;
@@ -200,10 +199,11 @@ export function prepareCommand(shell: string, args: string[], cwd?: string, env?
 				}
 				command += ' ';
 			}
-			for (let a of args) {
+			for (const a of args) {
 				command += `${quote(a)} `;
 			}
 			break;
+		}
 	}
 
 	return command;

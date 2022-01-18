@@ -8,6 +8,7 @@ import { Disposable, IDisposable, toDisposable } from 'vs/base/common/lifecycle'
 import { LinkedList } from 'vs/base/common/linkedList';
 import { Schemas } from 'vs/base/common/network';
 import { URI } from 'vs/base/common/uri';
+import { IPath } from 'vs/platform/windows/common/windows';
 import { IConfigurationService } from 'vs/platform/configuration/common/configuration';
 import { registerSingleton } from 'vs/platform/instantiation/common/extensions';
 import { IRemoteAuthorityResolverService, ResolverResult } from 'vs/platform/remote/common/remoteAuthorityResolver';
@@ -18,7 +19,8 @@ import { WorkspaceTrustRequestOptions, IWorkspaceTrustManagementService, IWorksp
 import { ISingleFolderWorkspaceIdentifier, isSingleFolderWorkspaceIdentifier, isUntitledWorkspace, toWorkspaceIdentifier } from 'vs/platform/workspaces/common/workspaces';
 import { Memento, MementoObject } from 'vs/workbench/common/memento';
 import { IWorkbenchEnvironmentService } from 'vs/workbench/services/environment/common/environmentService';
-import { IUriIdentityService } from 'vs/workbench/services/uriIdentity/common/uriIdentity';
+import { IUriIdentityService } from 'vs/platform/uriIdentity/common/uriIdentity';
+import { isEqualAuthority } from 'vs/base/common/resources';
 
 export const WORKSPACE_TRUST_ENABLED = 'security.workspace.trust.enabled';
 export const WORKSPACE_TRUST_STARTUP_PROMPT = 'security.workspace.trust.startupPrompt';
@@ -45,6 +47,10 @@ export class CanonicalWorkspace implements IWorkspace {
 				uri: this.canonicalFolderUris[index]
 			};
 		});
+	}
+
+	get transient(): boolean | undefined {
+		return this.originalWorkspace.transient;
 	}
 
 	get configuration(): URI | null | undefined {
@@ -207,10 +213,17 @@ export class WorkspaceTrustManagementService extends Disposable implements IWork
 
 	private async resolveCanonicalUris(): Promise<void> {
 		// Open editors
-		const filesToOpenOrCreate = this.environmentService.configuration.filesToOpenOrCreate;
+		const filesToOpen: IPath[] = [];
+		if (this.environmentService.configuration.filesToOpenOrCreate) {
+			filesToOpen.push(...this.environmentService.configuration.filesToOpenOrCreate);
+		}
 
-		if (filesToOpenOrCreate) {
-			const filesToOpenOrCreateUris = filesToOpenOrCreate.filter(f => f.fileUri && f.fileUri.scheme === Schemas.file).map(f => f.fileUri!);
+		if (this.environmentService.configuration.filesToDiff) {
+			filesToOpen.push(...this.environmentService.configuration.filesToDiff);
+		}
+
+		if (filesToOpen.length) {
+			const filesToOpenOrCreateUris = filesToOpen.filter(f => f.fileUri && f.fileUri.scheme === Schemas.file).map(f => f.fileUri!);
 			const canonicalFilesToOpen = await Promise.all(filesToOpenOrCreateUris.map(uri => this.getCanonicalUri(uri)));
 
 			this._canonicalStartupFiles.push(...canonicalFilesToOpen.filter(uri => this._canonicalStartupFiles.every(u => !this.uriIdentityService.extUri.isEqual(uri, u))));
@@ -420,7 +433,7 @@ export class WorkspaceTrustManagementService extends Disposable implements IWork
 			return false;
 		}
 
-		return (getRemoteAuthority(uri) === this._remoteAuthority.authority.authority) && !!this._remoteAuthority.options?.isTrusted;
+		return (isEqualAuthority(getRemoteAuthority(uri), this._remoteAuthority.authority.authority)) && !!this._remoteAuthority.options?.isTrusted;
 	}
 
 	private set isTrusted(value: boolean) {

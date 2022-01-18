@@ -16,7 +16,7 @@ import { renderViewTree } from 'vs/workbench/contrib/debug/browser/baseDebugView
 import { IAction, Action } from 'vs/base/common/actions';
 import { IEditorService } from 'vs/workbench/services/editor/common/editorService';
 import { IConfigurationService } from 'vs/platform/configuration/common/configuration';
-import { IContextKey, IContextKeyService, ContextKeyEqualsExpr, ContextKeyExpr, ContextKeyExpression } from 'vs/platform/contextkey/common/contextkey';
+import { IContextKey, IContextKeyService, ContextKeyExpr, ContextKeyExpression } from 'vs/platform/contextkey/common/contextkey';
 import { ViewPane, ViewAction } from 'vs/workbench/browser/parts/views/viewPane';
 import { ILabelService } from 'vs/platform/label/common/label';
 import { IListAccessibilityProvider } from 'vs/base/browser/ui/list/listWidget';
@@ -51,17 +51,34 @@ const $ = dom.$;
 
 type CallStackItem = IStackFrame | IThread | IDebugSession | string | ThreadAndSessionIds | IStackFrame[];
 
+function assignSessionContext(element: IDebugSession, context: any) {
+	context.sessionId = element.getId();
+	return context;
+}
+
+function assignThreadContext(element: IThread, context: any) {
+	context.threadId = element.getId();
+	assignSessionContext(element.session, context);
+	return context;
+}
+
+function assignStackFrameContext(element: StackFrame, context: any) {
+	context.frameId = element.getId();
+	context.frameLocation = { range: element.range, source: element.source.raw };
+	assignThreadContext(element.thread, context);
+	return context;
+}
+
 export function getContext(element: CallStackItem | null): any {
-	return element instanceof StackFrame ? {
-		sessionId: element.thread.session.getId(),
-		threadId: element.thread.getId(),
-		frameId: element.getId()
-	} : element instanceof Thread ? {
-		sessionId: element.session.getId(),
-		threadId: element.getId()
-	} : isDebugSession(element) ? {
-		sessionId: element.getId()
-	} : undefined;
+	if (element instanceof StackFrame) {
+		return assignStackFrameContext(element, {});
+	} else if (element instanceof Thread) {
+		return assignThreadContext(element, {});
+	} else if (isDebugSession(element)) {
+		return assignSessionContext(element, {});
+	} else {
+		return undefined;
+	}
 }
 
 // Extensions depend on this context, should not be changed even though it is not fully deterministic
@@ -100,7 +117,7 @@ export function getSpecificSourceName(stackFrame: IStackFrame): string {
 	}
 
 	const from = Math.max(0, stackFrame.source.uri.path.lastIndexOf(posix.sep, stackFrame.source.uri.path.length - suffixLength - 1));
-	return (from > 0 ? '...' : '') + stackFrame.source.uri.path.substr(from);
+	return (from > 0 ? '...' : '') + stackFrame.source.uri.path.substring(from);
 }
 
 async function expandTo(session: IDebugSession, tree: WorkbenchCompressibleAsyncDataTree<IDebugModel, CallStackItem, FuzzyScore>): Promise<void> {
@@ -154,7 +171,7 @@ export class CallStackView extends ViewPane {
 		this._register(this.menu);
 
 		// Create scheduler to prevent unnecessary flashing of tree when reacting to changes
-		this.onCallStackChangeScheduler = new RunOnceScheduler(async () => {
+		this.onCallStackChangeScheduler = this._register(new RunOnceScheduler(async () => {
 			// Only show the global pause message if we do not display threads.
 			// Otherwise there will be a pause message per thread and there is no need for a global one.
 			const sessions = this.debugService.getModel().getSessions();
@@ -190,7 +207,7 @@ export class CallStackView extends ViewPane {
 						toExpand.add(s.parentSession);
 					}
 				});
-				for (let session of toExpand) {
+				for (const session of toExpand) {
 					await expandTo(session, this.tree);
 					this.autoExpandedSessions.add(session);
 				}
@@ -201,7 +218,7 @@ export class CallStackView extends ViewPane {
 				this.selectionNeedsUpdate = false;
 				await this.updateTreeSelection();
 			}
-		}, 50);
+		}, 50));
 	}
 
 	protected override renderHeaderTitle(container: HTMLElement): void {
@@ -513,13 +530,13 @@ class SessionsRenderer implements ICompressibleTreeRenderer<IDebugSession, Fuzzy
 		dom.append(session, $(ThemeIcon.asCSSSelector(icons.callstackViewSession)));
 		const name = dom.append(session, $('.name'));
 		const stateLabel = dom.append(session, $('span.state.label.monaco-count-badge.long'));
-		const label = new HighlightedLabel(name, false);
+		const label = new HighlightedLabel(name);
 		const actionBar = new ActionBar(session, {
 			actionViewItemProvider: action => {
 				if (action instanceof MenuItemAction) {
 					return this.instantiationService.createInstance(MenuEntryActionViewItem, action, undefined);
 				} else if (action instanceof SubmenuItemAction) {
-					return this.instantiationService.createInstance(SubmenuEntryActionViewItem, action);
+					return this.instantiationService.createInstance(SubmenuEntryActionViewItem, action, undefined);
 				}
 
 				return undefined;
@@ -600,7 +617,7 @@ class ThreadsRenderer implements ICompressibleTreeRenderer<IThread, FuzzyScore, 
 		const thread = dom.append(container, $('.thread'));
 		const name = dom.append(thread, $('.name'));
 		const stateLabel = dom.append(thread, $('span.state.label.monaco-count-badge.long'));
-		const label = new HighlightedLabel(name, false);
+		const label = new HighlightedLabel(name);
 		const actionBar = new ActionBar(thread);
 		const elementDisposable: IDisposable[] = [];
 
@@ -656,7 +673,7 @@ class StackFramesRenderer implements ICompressibleTreeRenderer<IStackFrame, Fuzz
 		const fileName = dom.append(file, $('span.file-name'));
 		const wrapper = dom.append(file, $('span.line-number-wrapper'));
 		const lineNumber = dom.append(wrapper, $('span.line-number.monaco-count-badge'));
-		const label = new HighlightedLabel(labelDiv, false);
+		const label = new HighlightedLabel(labelDiv);
 		const actionBar = new ActionBar(stackFrame);
 
 		return { file, fileName, label, lineNumber, stackFrame, actionBar };
@@ -1029,7 +1046,7 @@ registerAction2(class Collapse extends ViewAction<CallStackView> {
 				id: MenuId.ViewTitle,
 				order: 10,
 				group: 'navigation',
-				when: ContextKeyEqualsExpr.create('view', CALLSTACK_VIEW_ID)
+				when: ContextKeyExpr.equals('view', CALLSTACK_VIEW_ID)
 			}
 		});
 	}

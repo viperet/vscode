@@ -3,11 +3,13 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { isSafari } from 'vs/base/browser/browser';
+import { IndexedDB } from 'vs/base/browser/indexedDB';
 import { Promises } from 'vs/base/common/async';
 import { toErrorMessage } from 'vs/base/common/errorMessage';
-import { Event } from 'vs/base/common/event';
-import { Disposable, IDisposable } from 'vs/base/common/lifecycle';
-import { InMemoryStorageDatabase, IStorage, IStorageDatabase, IUpdateRequest, Storage } from 'vs/base/parts/storage/common/storage';
+import { Emitter } from 'vs/base/common/event';
+import { Disposable, IDisposable, toDisposable } from 'vs/base/common/lifecycle';
+import { InMemoryStorageDatabase, isStorageItemsChangeEvent, IStorage, IStorageDatabase, IStorageItemsChangeEvent, IUpdateRequest, Storage } from 'vs/base/parts/storage/common/storage';
 import { ILogService } from 'vs/platform/log/common/log';
 import { AbstractStorageService, IS_NEW_KEY, StorageScope, StorageTarget } from 'vs/platform/storage/common/storage';
 import { IWorkspaceInitializationPayload } from 'vs/platform/workspaces/common/workspaces';
@@ -41,8 +43,8 @@ export class BrowserStorageService extends AbstractStorageService {
 
 		// Create Storage in Parallel
 		const [workspaceStorageDatabase, globalStorageDatabase] = await Promises.settled([
-			IndexedDBStorageDatabase.create(this.getId(StorageScope.WORKSPACE), this.logService),
-			IndexedDBStorageDatabase.create(this.getId(StorageScope.GLOBAL), this.logService)
+			IndexedDBStorageDatabase.create({ id: this.getId(StorageScope.WORKSPACE) }, this.logService),
+			IndexedDBStorageDatabase.create({ id: this.getId(StorageScope.GLOBAL), broadcastChanges: true /* only for global storage */ }, this.logService)
 		]);
 
 		// Workspace Storage
@@ -104,13 +106,20 @@ export class BrowserStorageService extends AbstractStorageService {
 	}
 
 	close(): void {
-		// We explicitly do not close our DBs because writing data onBeforeUnload()
-		// can result in unexpected results. Namely, it seems that - even though this
-		// operation is async - sometimes it is being triggered on unload and
-		// succeeds. Often though, the DBs turn out to be empty because the write
-		// never had a chance to complete.
+
+		// Safari: there is an issue where the page can hang on load when
+		// a previous session has kept IndexedDB transactions running.
+		// The only fix seems to be to cancel any pending transactions
+		// (https://github.com/microsoft/vscode/issues/136295)
 		//
-		// Instead we trigger dispose() to ensure that no timeouts or callbacks
+		// On all other browsers, we keep the databases opened because
+		// we expect data to be written when the unload happens.
+		if (isSafari) {
+			this.globalStorageDatabase?.close();
+			this.workspaceStorageDatabase?.close();
+		}
+
+		// Always dispose to ensure that no timeouts or callbacks
 		// get triggered in this phase.
 		this.dispose();
 	}
@@ -163,16 +172,21 @@ class InMemoryIndexedDBStorageDatabase extends InMemoryStorageDatabase implement
 	}
 }
 
+interface IndexedDBStorageDatabaseOptions {
+	id: string;
+	broadcastChanges?: boolean;
+}
+
 export class IndexedDBStorageDatabase extends Disposable implements IIndexedDBStorageDatabase {
 
-	static async create(id: string, logService: ILogService): Promise<IIndexedDBStorageDatabase> {
+	static async create(options: IndexedDBStorageDatabaseOptions, logService: ILogService): Promise<IIndexedDBStorageDatabase> {
 		try {
-			const database = new IndexedDBStorageDatabase(id, logService);
+			const database = new IndexedDBStorageDatabase(options, logService);
 			await database.whenConnected;
 
 			return database;
 		} catch (error) {
-			logService.error(`[IndexedDB Storage ${id}] create(): ${toErrorMessage(error, true)}`);
+			logService.error(`[IndexedDB Storage ${options.id}] create(): ${toErrorMessage(error, true)}`);
 
 			return new InMemoryIndexedDBStorageDatabase();
 		}
@@ -181,124 +195,128 @@ export class IndexedDBStorageDatabase extends Disposable implements IIndexedDBSt
 	private static readonly STORAGE_DATABASE_PREFIX = 'vscode-web-state-db-';
 	private static readonly STORAGE_OBJECT_STORE = 'ItemTable';
 
-	readonly onDidChangeItemsExternal = Event.None; // IndexedDB currently does not support observers (https://github.com/w3c/IndexedDB/issues/51)
+	private static readonly STORAGE_BROADCAST_CHANNEL = 'vscode.web.state.changes';
 
-	private pendingUpdate: Promise<void> | undefined = undefined;
+	private readonly _onDidChangeItemsExternal = this._register(new Emitter<IStorageItemsChangeEvent>());
+	readonly onDidChangeItemsExternal = this._onDidChangeItemsExternal.event;
+
+	private broadcastChannel: BroadcastChannel | undefined;
+
+	private pendingUpdate: Promise<boolean> | undefined = undefined;
 	get hasPendingUpdate(): boolean { return !!this.pendingUpdate; }
 
 	private readonly name: string;
-	private readonly whenConnected: Promise<IDBDatabase>;
+	private readonly whenConnected: Promise<IndexedDB>;
 
 	private constructor(
-		id: string,
+		options: IndexedDBStorageDatabaseOptions,
 		private readonly logService: ILogService
 	) {
 		super();
 
-		this.name = `${IndexedDBStorageDatabase.STORAGE_DATABASE_PREFIX}${id}`;
+		this.name = `${IndexedDBStorageDatabase.STORAGE_DATABASE_PREFIX}${options.id}`;
+		this.broadcastChannel = options.broadcastChanges && ('BroadcastChannel' in window) ? new BroadcastChannel(IndexedDBStorageDatabase.STORAGE_BROADCAST_CHANNEL) : undefined;
+
 		this.whenConnected = this.connect();
+
+		this.registerListeners();
 	}
 
-	private connect(): Promise<IDBDatabase> {
-		return new Promise<IDBDatabase>((resolve, reject) => {
-			const request = window.indexedDB.open(this.name);
+	private registerListeners(): void {
 
-			// Create `ItemTable` object-store when this DB is new
-			request.onupgradeneeded = () => {
-				request.result.createObjectStore(IndexedDBStorageDatabase.STORAGE_OBJECT_STORE);
-			};
-
-			// IndexedDB opened successfully
-			request.onsuccess = () => resolve(request.result);
-
-			// Fail on error (we will then fallback to in-memory DB)
-			request.onerror = () => reject(request.error);
-		});
-	}
-
-	getItems(): Promise<Map<string, string>> {
-		return new Promise<Map<string, string>>(async resolve => {
-			const items = new Map<string, string>();
-
-			// Open a IndexedDB Cursor to iterate over key/values
-			const db = await this.whenConnected;
-			const transaction = db.transaction(IndexedDBStorageDatabase.STORAGE_OBJECT_STORE, 'readonly');
-			const objectStore = transaction.objectStore(IndexedDBStorageDatabase.STORAGE_OBJECT_STORE);
-			const cursor = objectStore.openCursor();
-			if (!cursor) {
-				return resolve(items); // this means the `ItemTable` was empty
-			}
-
-			// Iterate over rows of `ItemTable` until the end
-			cursor.onsuccess = () => {
-				if (cursor.result) {
-
-					// Keep cursor key/value in our map
-					if (typeof cursor.result.value === 'string') {
-						items.set(cursor.result.key.toString(), cursor.result.value);
-					}
-
-					// Advance cursor to next row
-					cursor.result.continue();
-				} else {
-					resolve(items); // reached end of table
+		// Check for global storage change events from other
+		// windows/tabs via `BroadcastChannel` mechanisms.
+		if (this.broadcastChannel) {
+			const listener = (event: MessageEvent) => {
+				if (isStorageItemsChangeEvent(event.data)) {
+					this._onDidChangeItemsExternal.fire(event.data);
 				}
 			};
 
-			const onError = (error: Error | null) => {
-				this.logService.error(`[IndexedDB Storage ${this.name}] getItems(): ${toErrorMessage(error, true)}`);
-
-				resolve(items);
-			};
-
-			// Error handlers
-			cursor.onerror = () => onError(cursor.error);
-			transaction.onerror = () => onError(transaction.error);
-		});
-	}
-
-	async updateItems(request: IUpdateRequest): Promise<void> {
-		this.pendingUpdate = this.doUpdateItems(request);
-		try {
-			await this.pendingUpdate;
-		} finally {
-			this.pendingUpdate = undefined;
+			this.broadcastChannel.addEventListener('message', listener);
+			this._register(toDisposable(() => {
+				this.broadcastChannel?.removeEventListener('message', listener);
+				this.broadcastChannel?.close();
+			}));
 		}
 	}
 
-	private async doUpdateItems(request: IUpdateRequest): Promise<void> {
+	private async connect(): Promise<IndexedDB> {
+		try {
+			return await IndexedDB.create(this.name, undefined, [IndexedDBStorageDatabase.STORAGE_OBJECT_STORE]);
+		} catch (error) {
+			this.logService.error(`[IndexedDB Storage ${this.name}] connect() error: ${toErrorMessage(error)}`);
+
+			throw error;
+		}
+	}
+
+	async getItems(): Promise<Map<string, string>> {
+		const db = await this.whenConnected;
+
+		function isValid(value: unknown): value is string {
+			return typeof value === 'string';
+		}
+
+		return db.getKeyValues<string>(IndexedDBStorageDatabase.STORAGE_OBJECT_STORE, isValid);
+	}
+
+	async updateItems(request: IUpdateRequest): Promise<void> {
+
+		// Run the update
+		let didUpdate = false;
+		this.pendingUpdate = this.doUpdateItems(request);
+		try {
+			didUpdate = await this.pendingUpdate;
+		} finally {
+			this.pendingUpdate = undefined;
+		}
+
+		// Broadcast changes to other windows/tabs if enabled
+		// and only if we actually did update storage items.
+		if (this.broadcastChannel && didUpdate) {
+			const event: IStorageItemsChangeEvent = {
+				changed: request.insert,
+				deleted: request.delete
+			};
+
+			this.broadcastChannel.postMessage(event);
+		}
+	}
+
+	private async doUpdateItems(request: IUpdateRequest): Promise<boolean> {
 
 		// Return early if the request is empty
 		const toInsert = request.insert;
 		const toDelete = request.delete;
 		if ((!toInsert && !toDelete) || (toInsert?.size === 0 && toDelete?.size === 0)) {
-			return;
+			return false;
 		}
 
+		const db = await this.whenConnected;
+
 		// Update `ItemTable` with inserts and/or deletes
-		return new Promise<void>(async (resolve, reject) => {
-			const db = await this.whenConnected;
-
-			const transaction = db.transaction(IndexedDBStorageDatabase.STORAGE_OBJECT_STORE, 'readwrite');
-			transaction.oncomplete = () => resolve();
-			transaction.onerror = () => reject(transaction.error);
-
-			const objectStore = transaction.objectStore(IndexedDBStorageDatabase.STORAGE_OBJECT_STORE);
+		await db.runInTransaction(IndexedDBStorageDatabase.STORAGE_OBJECT_STORE, 'readwrite', objectStore => {
+			const requests: IDBRequest[] = [];
 
 			// Inserts
 			if (toInsert) {
 				for (const [key, value] of toInsert) {
-					objectStore.put(value, key);
+					requests.push(objectStore.put(value, key));
 				}
 			}
 
 			// Deletes
 			if (toDelete) {
 				for (const key of toDelete) {
-					objectStore.delete(key);
+					requests.push(objectStore.delete(key));
 				}
 			}
+
+			return requests;
 		});
+
+		return true;
 	}
 
 	async close(): Promise<void> {
@@ -311,17 +329,9 @@ export class IndexedDBStorageDatabase extends Disposable implements IIndexedDBSt
 		return db.close();
 	}
 
-	clear(): Promise<void> {
-		return new Promise<void>(async (resolve, reject) => {
-			const db = await this.whenConnected;
+	async clear(): Promise<void> {
+		const db = await this.whenConnected;
 
-			const transaction = db.transaction(IndexedDBStorageDatabase.STORAGE_OBJECT_STORE, 'readwrite');
-			transaction.oncomplete = () => resolve();
-			transaction.onerror = () => reject(transaction.error);
-
-			// Clear every row in the `ItemTable`
-			const objectStore = transaction.objectStore(IndexedDBStorageDatabase.STORAGE_OBJECT_STORE);
-			objectStore.clear();
-		});
+		await db.runInTransaction(IndexedDBStorageDatabase.STORAGE_OBJECT_STORE, 'readwrite', objectStore => objectStore.clear());
 	}
 }

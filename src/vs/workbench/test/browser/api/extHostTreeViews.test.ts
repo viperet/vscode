@@ -17,8 +17,8 @@ import { IInstantiationService } from 'vs/platform/instantiation/common/instanti
 import { mock } from 'vs/base/test/common/mock';
 import { TreeItemCollapsibleState, ITreeItem, IRevealOptions } from 'vs/workbench/common/views';
 import { NullLogService } from 'vs/platform/log/common/log';
-import { IExtensionDescription } from 'vs/platform/extensions/common/extensions';
 import type { IDisposable } from 'vs/base/common/lifecycle';
+import { nullExtensionDescription as extensionsDescription } from 'vs/workbench/services/extensions/common/extensions';
 
 suite('ExtHostTreeView', function () {
 
@@ -80,9 +80,9 @@ suite('ExtHostTreeView', function () {
 		), new NullLogService());
 		onDidChangeTreeNode = new Emitter<{ key: string } | undefined>();
 		onDidChangeTreeNodeWithId = new Emitter<{ key: string }>();
-		testObject.createTreeView('testNodeTreeProvider', { treeDataProvider: aNodeTreeDataProvider() }, { enableProposedApi: true } as IExtensionDescription);
-		testObject.createTreeView('testNodeWithIdTreeProvider', { treeDataProvider: aNodeWithIdTreeDataProvider() }, { enableProposedApi: true } as IExtensionDescription);
-		testObject.createTreeView('testNodeWithHighlightsTreeProvider', { treeDataProvider: aNodeWithHighlightedLabelTreeDataProvider() }, { enableProposedApi: true } as IExtensionDescription);
+		testObject.createTreeView('testNodeTreeProvider', { treeDataProvider: aNodeTreeDataProvider() }, extensionsDescription);
+		testObject.createTreeView('testNodeWithIdTreeProvider', { treeDataProvider: aNodeWithIdTreeDataProvider() }, extensionsDescription);
+		testObject.createTreeView('testNodeWithHighlightsTreeProvider', { treeDataProvider: aNodeWithHighlightedLabelTreeDataProvider() }, extensionsDescription);
 
 		return loadCompleteTree('testNodeTreeProvider');
 	});
@@ -90,25 +90,25 @@ suite('ExtHostTreeView', function () {
 	test('construct node tree', () => {
 		return testObject.$getChildren('testNodeTreeProvider')
 			.then(elements => {
-				const actuals = elements.map(e => e.handle);
+				const actuals = elements?.map(e => e.handle);
 				assert.deepStrictEqual(actuals, ['0/0:a', '0/0:b']);
 				return Promise.all([
 					testObject.$getChildren('testNodeTreeProvider', '0/0:a')
 						.then(children => {
-							const actuals = children.map(e => e.handle);
+							const actuals = children?.map(e => e.handle);
 							assert.deepStrictEqual(actuals, ['0/0:a/0:aa', '0/0:a/0:ab']);
 							return Promise.all([
-								testObject.$getChildren('testNodeTreeProvider', '0/0:a/0:aa').then(children => assert.strictEqual(children.length, 0)),
-								testObject.$getChildren('testNodeTreeProvider', '0/0:a/0:ab').then(children => assert.strictEqual(children.length, 0))
+								testObject.$getChildren('testNodeTreeProvider', '0/0:a/0:aa').then(children => assert.strictEqual(children?.length, 0)),
+								testObject.$getChildren('testNodeTreeProvider', '0/0:a/0:ab').then(children => assert.strictEqual(children?.length, 0))
 							]);
 						}),
 					testObject.$getChildren('testNodeTreeProvider', '0/0:b')
 						.then(children => {
-							const actuals = children.map(e => e.handle);
+							const actuals = children?.map(e => e.handle);
 							assert.deepStrictEqual(actuals, ['0/0:b/0:ba', '0/0:b/0:bb']);
 							return Promise.all([
-								testObject.$getChildren('testNodeTreeProvider', '0/0:b/0:ba').then(children => assert.strictEqual(children.length, 0)),
-								testObject.$getChildren('testNodeTreeProvider', '0/0:b/0:bb').then(children => assert.strictEqual(children.length, 0))
+								testObject.$getChildren('testNodeTreeProvider', '0/0:b/0:ba').then(children => assert.strictEqual(children?.length, 0)),
+								testObject.$getChildren('testNodeTreeProvider', '0/0:b/0:bb').then(children => assert.strictEqual(children?.length, 0))
 							]);
 						})
 				]);
@@ -118,25 +118,25 @@ suite('ExtHostTreeView', function () {
 	test('construct id tree', () => {
 		return testObject.$getChildren('testNodeWithIdTreeProvider')
 			.then(elements => {
-				const actuals = elements.map(e => e.handle);
+				const actuals = elements?.map(e => e.handle);
 				assert.deepStrictEqual(actuals, ['1/a', '1/b']);
 				return Promise.all([
 					testObject.$getChildren('testNodeWithIdTreeProvider', '1/a')
 						.then(children => {
-							const actuals = children.map(e => e.handle);
+							const actuals = children?.map(e => e.handle);
 							assert.deepStrictEqual(actuals, ['1/aa', '1/ab']);
 							return Promise.all([
-								testObject.$getChildren('testNodeWithIdTreeProvider', '1/aa').then(children => assert.strictEqual(children.length, 0)),
-								testObject.$getChildren('testNodeWithIdTreeProvider', '1/ab').then(children => assert.strictEqual(children.length, 0))
+								testObject.$getChildren('testNodeWithIdTreeProvider', '1/aa').then(children => assert.strictEqual(children?.length, 0)),
+								testObject.$getChildren('testNodeWithIdTreeProvider', '1/ab').then(children => assert.strictEqual(children?.length, 0))
 							]);
 						}),
 					testObject.$getChildren('testNodeWithIdTreeProvider', '1/b')
 						.then(children => {
-							const actuals = children.map(e => e.handle);
+							const actuals = children?.map(e => e.handle);
 							assert.deepStrictEqual(actuals, ['1/ba', '1/bb']);
 							return Promise.all([
-								testObject.$getChildren('testNodeWithIdTreeProvider', '1/ba').then(children => assert.strictEqual(children.length, 0)),
-								testObject.$getChildren('testNodeWithIdTreeProvider', '1/bb').then(children => assert.strictEqual(children.length, 0))
+								testObject.$getChildren('testNodeWithIdTreeProvider', '1/ba').then(children => assert.strictEqual(children?.length, 0)),
+								testObject.$getChildren('testNodeWithIdTreeProvider', '1/bb').then(children => assert.strictEqual(children?.length, 0))
 							]);
 						})
 				]);
@@ -200,7 +200,7 @@ suite('ExtHostTreeView', function () {
 		target.onRefresh.event(() => {
 			testObject.$getChildren('testNodeWithIdTreeProvider')
 				.then(elements => {
-					const actuals = elements.map(e => e.handle);
+					const actuals = elements?.map(e => e.handle);
 					assert.deepStrictEqual(actuals, ['1/a', '1/b']);
 					return testObject.$getChildren('testNodeWithIdTreeProvider', '1/a')
 						.then(() => testObject.$getChildren('testNodeWithIdTreeProvider', '1/b'))
@@ -398,7 +398,7 @@ suite('ExtHostTreeView', function () {
 		target.onRefresh.event(() => {
 			testObject.$getChildren('testNodeTreeProvider')
 				.then(elements => {
-					assert.deepStrictEqual(elements.map(e => e.handle), ['0/0:a//0:b']);
+					assert.deepStrictEqual(elements?.map(e => e.handle), ['0/0:a//0:b']);
 					done();
 				});
 		});
@@ -440,11 +440,11 @@ suite('ExtHostTreeView', function () {
 		target.onRefresh.event(() => {
 			testObject.$getChildren('testNodeTreeProvider')
 				.then(elements => {
-					const actuals = elements.map(e => e.handle);
+					const actuals = elements?.map(e => e.handle);
 					assert.deepStrictEqual(actuals, ['0/0:a', '0/0:b', '0/1:a', '0/0:d', '0/1:b', '0/0:f', '0/2:a']);
 					return testObject.$getChildren('testNodeTreeProvider', '0/1:b')
 						.then(elements => {
-							const actuals = elements.map(e => e.handle);
+							const actuals = elements?.map(e => e.handle);
 							assert.deepStrictEqual(actuals, ['0/1:b/0:h', '0/1:b/1:h', '0/1:b/0:j', '0/1:b/1:j', '0/1:b/2:h']);
 							done();
 						});
@@ -462,7 +462,7 @@ suite('ExtHostTreeView', function () {
 		target.onRefresh.event(() => {
 			testObject.$getChildren('testNodeTreeProvider')
 				.then(elements => {
-					assert.deepStrictEqual(elements.map(e => e.handle), ['0/0:c']);
+					assert.deepStrictEqual(elements?.map(e => e.handle), ['0/0:c']);
 					done();
 				});
 		});
@@ -477,19 +477,19 @@ suite('ExtHostTreeView', function () {
 
 		return testObject.$getChildren('testNodeTreeProvider')
 			.then(elements => {
-				assert.deepStrictEqual(elements.map(e => e.handle), ['0/0:a', '0/0:b']);
+				assert.deepStrictEqual(elements?.map(e => e.handle), ['0/0:a', '0/0:b']);
 			});
 	});
 
 	test('reveal will throw an error if getParent is not implemented', () => {
-		const treeView = testObject.createTreeView('treeDataProvider', { treeDataProvider: aNodeTreeDataProvider() }, { enableProposedApi: true } as IExtensionDescription);
+		const treeView = testObject.createTreeView('treeDataProvider', { treeDataProvider: aNodeTreeDataProvider() }, extensionsDescription);
 		return treeView.reveal({ key: 'a' })
 			.then(() => assert.fail('Reveal should throw an error as getParent is not implemented'), () => null);
 	});
 
 	test('reveal will return empty array for root element', () => {
 		const revealTarget = sinon.spy(target, '$reveal');
-		const treeView = testObject.createTreeView('treeDataProvider', { treeDataProvider: aCompleteNodeTreeDataProvider() }, { enableProposedApi: true } as IExtensionDescription);
+		const treeView = testObject.createTreeView('treeDataProvider', { treeDataProvider: aCompleteNodeTreeDataProvider() }, extensionsDescription);
 		const expected = {
 			item:
 				{ handle: '0/0:a', label: { label: 'a' }, collapsibleState: TreeItemCollapsibleState.Collapsed },
@@ -506,7 +506,7 @@ suite('ExtHostTreeView', function () {
 
 	test('reveal will return parents array for an element when hierarchy is not loaded', () => {
 		const revealTarget = sinon.spy(target, '$reveal');
-		const treeView = testObject.createTreeView('treeDataProvider', { treeDataProvider: aCompleteNodeTreeDataProvider() }, { enableProposedApi: true } as IExtensionDescription);
+		const treeView = testObject.createTreeView('treeDataProvider', { treeDataProvider: aCompleteNodeTreeDataProvider() }, extensionsDescription);
 		const expected = {
 			item: { handle: '0/0:a/0:aa', label: { label: 'aa' }, collapsibleState: TreeItemCollapsibleState.None, parentHandle: '0/0:a' },
 			parentChain: [{ handle: '0/0:a', label: { label: 'a' }, collapsibleState: TreeItemCollapsibleState.Collapsed }]
@@ -523,7 +523,7 @@ suite('ExtHostTreeView', function () {
 
 	test('reveal will return parents array for an element when hierarchy is loaded', () => {
 		const revealTarget = sinon.spy(target, '$reveal');
-		const treeView = testObject.createTreeView('treeDataProvider', { treeDataProvider: aCompleteNodeTreeDataProvider() }, { enableProposedApi: true } as IExtensionDescription);
+		const treeView = testObject.createTreeView('treeDataProvider', { treeDataProvider: aCompleteNodeTreeDataProvider() }, extensionsDescription);
 		const expected = {
 			item: { handle: '0/0:a/0:aa', label: { label: 'aa' }, collapsibleState: TreeItemCollapsibleState.None, parentHandle: '0/0:a' },
 			parentChain: [{ handle: '0/0:a', label: { label: 'a' }, collapsibleState: TreeItemCollapsibleState.Collapsed }]
@@ -549,7 +549,7 @@ suite('ExtHostTreeView', function () {
 			}
 		};
 		const revealTarget = sinon.spy(target, '$reveal');
-		const treeView = testObject.createTreeView('treeDataProvider', { treeDataProvider: aCompleteNodeTreeDataProvider() }, { enableProposedApi: true } as IExtensionDescription);
+		const treeView = testObject.createTreeView('treeDataProvider', { treeDataProvider: aCompleteNodeTreeDataProvider() }, extensionsDescription);
 		const expected = {
 			item: { handle: '0/0:b/0:ba/0:bac', label: { label: 'bac' }, collapsibleState: TreeItemCollapsibleState.None, parentHandle: '0/0:b/0:ba' },
 			parentChain: [
@@ -569,7 +569,7 @@ suite('ExtHostTreeView', function () {
 
 	test('reveal after first udpate', () => {
 		const revealTarget = sinon.spy(target, '$reveal');
-		const treeView = testObject.createTreeView('treeDataProvider', { treeDataProvider: aCompleteNodeTreeDataProvider() }, { enableProposedApi: true } as IExtensionDescription);
+		const treeView = testObject.createTreeView('treeDataProvider', { treeDataProvider: aCompleteNodeTreeDataProvider() }, extensionsDescription);
 		const expected = {
 			item: { handle: '0/0:a/0:ac', label: { label: 'ac' }, collapsibleState: TreeItemCollapsibleState.None, parentHandle: '0/0:a' },
 			parentChain: [{ handle: '0/0:a', label: { label: 'a' }, collapsibleState: TreeItemCollapsibleState.Collapsed }]
@@ -601,7 +601,7 @@ suite('ExtHostTreeView', function () {
 
 	test('reveal after second udpate', () => {
 		const revealTarget = sinon.spy(target, '$reveal');
-		const treeView = testObject.createTreeView('treeDataProvider', { treeDataProvider: aCompleteNodeTreeDataProvider() }, { enableProposedApi: true } as IExtensionDescription);
+		const treeView = testObject.createTreeView('treeDataProvider', { treeDataProvider: aCompleteNodeTreeDataProvider() }, extensionsDescription);
 		return loadCompleteTree('treeDataProvider')
 			.then(() => {
 				return runWithEventMerging((resolve) => {
@@ -643,7 +643,7 @@ suite('ExtHostTreeView', function () {
 
 	function loadCompleteTree(treeId: string, element?: string): Promise<null> {
 		return testObject.$getChildren(treeId, element)
-			.then(elements => elements.map(e => loadCompleteTree(treeId, e.handle)))
+			.then(elements => elements?.map(e => loadCompleteTree(treeId, e.handle)))
 			.then(() => null);
 	}
 

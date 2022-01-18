@@ -7,8 +7,6 @@ import * as vscode from 'vscode';
 import { AzureActiveDirectoryService, onDidChangeSessions } from './AADHelper';
 import TelemetryReporter from 'vscode-extension-telemetry';
 
-export const DEFAULT_SCOPES = 'https://management.core.windows.net/.default offline_access';
-
 export async function activate(context: vscode.ExtensionContext) {
 	const { name, version, aiKey } = context.extension.packageJSON as { name: string, version: string, aiKey: string };
 	const telemetryReporter = new TelemetryReporter(name, version, aiKey);
@@ -33,7 +31,7 @@ export async function activate(context: vscode.ExtensionContext) {
 					scopes: JSON.stringify(scopes.map(s => s.replace(/[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}/i, '{guid}'))),
 				});
 
-				const session = await loginService.createSession(scopes.sort().join(' '));
+				const session = await loginService.createSession(scopes.sort());
 				onDidChangeSessions.fire({ added: [session], removed: [], changed: [] });
 				return session;
 			} catch (e) {

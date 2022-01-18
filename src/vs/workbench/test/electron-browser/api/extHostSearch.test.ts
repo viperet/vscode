@@ -5,25 +5,25 @@
 
 import * as assert from 'assert';
 import { mapArrayOrNot } from 'vs/base/common/arrays';
+import { timeout } from 'vs/base/common/async';
 import { CancellationTokenSource } from 'vs/base/common/cancellation';
-import { isPromiseCanceledError } from 'vs/base/common/errors';
+import { isCancellationError } from 'vs/base/common/errors';
 import { DisposableStore } from 'vs/base/common/lifecycle';
 import { joinPath } from 'vs/base/common/resources';
 import { URI, UriComponents } from 'vs/base/common/uri';
 import * as pfs from 'vs/base/node/pfs';
-import { MainContext, MainThreadSearchShape } from 'vs/workbench/api/common/extHost.protocol';
-import { NativeExtHostSearch } from 'vs/workbench/api/node/extHostSearch';
-import { Range } from 'vs/workbench/api/common/extHostTypes';
-import { IFileMatch, IFileQuery, IPatternInfo, IRawFileMatch2, ISearchCompleteStats, ISearchQuery, ITextQuery, QueryType, resultIsMatch } from 'vs/workbench/services/search/common/search';
-import { TestRPCProtocol } from 'vs/workbench/test/browser/api/testRPCProtocol';
-import type * as vscode from 'vscode';
-import { NullLogService } from 'vs/platform/log/common/log';
-import { URITransformerService } from 'vs/workbench/api/common/extHostUriTransformerService';
 import { mock } from 'vs/base/test/common/mock';
+import { NullLogService } from 'vs/platform/log/common/log';
+import { MainContext, MainThreadSearchShape } from 'vs/workbench/api/common/extHost.protocol';
 import { IExtHostInitDataService } from 'vs/workbench/api/common/extHostInitDataService';
+import { Range } from 'vs/workbench/api/common/extHostTypes';
+import { URITransformerService } from 'vs/workbench/api/common/extHostUriTransformerService';
+import { NativeExtHostSearch } from 'vs/workbench/api/node/extHostSearch';
+import { IFileMatch, IFileQuery, IPatternInfo, IRawFileMatch2, ISearchCompleteStats, ISearchQuery, ITextQuery, QueryType, resultIsMatch } from 'vs/workbench/services/search/common/search';
 import { TextSearchManager } from 'vs/workbench/services/search/common/textSearchManager';
 import { NativeTextSearchManager } from 'vs/workbench/services/search/node/textSearchManager';
-import { timeout } from 'vs/base/common/async';
+import { TestRPCProtocol } from 'vs/workbench/test/browser/api/testRPCProtocol';
+import type * as vscode from 'vscode';
 
 let rpcProtocol: TestRPCProtocol;
 let extHostSearch: NativeExtHostSearch;
@@ -78,7 +78,7 @@ suite('ExtHostSearch', () => {
 		await rpcProtocol.sync();
 	}
 
-	async function runFileSearch(query: IFileQuery, cancel = false): Promise<{ results: URI[]; stats: ISearchCompleteStats }> {
+	async function runFileSearch(query: IFileQuery, cancel = false): Promise<{ results: URI[]; stats: ISearchCompleteStats; }> {
 		let stats: ISearchCompleteStats;
 		try {
 			const cancellation = new CancellationTokenSource();
@@ -90,7 +90,7 @@ suite('ExtHostSearch', () => {
 
 			stats = await p;
 		} catch (err) {
-			if (!isPromiseCanceledError(err)) {
+			if (!isCancellationError(err)) {
 				await rpcProtocol.sync();
 				throw err;
 			}
@@ -103,7 +103,7 @@ suite('ExtHostSearch', () => {
 		};
 	}
 
-	async function runTextSearch(query: ITextQuery): Promise<{ results: IFileMatch[], stats: ISearchCompleteStats }> {
+	async function runTextSearch(query: ITextQuery): Promise<{ results: IFileMatch[], stats: ISearchCompleteStats; }> {
 		let stats: ISearchCompleteStats;
 		try {
 			const cancellation = new CancellationTokenSource();
@@ -111,7 +111,7 @@ suite('ExtHostSearch', () => {
 
 			stats = await p;
 		} catch (err) {
-			if (!isPromiseCanceledError(err)) {
+			if (!isCancellationError(err)) {
 				await rpcProtocol.sync();
 				throw err;
 			}
@@ -141,7 +141,7 @@ suite('ExtHostSearch', () => {
 			constructor() {
 				super(
 					rpcProtocol,
-					new class extends mock<IExtHostInitDataService>() { remote = { isRemote: false, authority: undefined, connectionData: null }; },
+					new class extends mock<IExtHostInitDataService>() { override remote = { isRemote: false, authority: undefined, connectionData: null }; },
 					new URITransformerService(null),
 					logService
 				);
@@ -398,6 +398,43 @@ suite('ExtHostSearch', () => {
 				results,
 				[
 					joinPath(rootFolderA, 'file1.ts')
+				]);
+		});
+
+		// https://github.com/microsoft/vscode-remotehub/issues/255
+		test('include, sibling exclude, and subfolder', async () => {
+			const reportedResults = [
+				'foo/file1.ts',
+				'foo/file1.js',
+			];
+
+			await registerTestFileSearchProvider({
+				provideFileSearchResults(query: vscode.FileSearchQuery, options: vscode.FileSearchOptions, token: vscode.CancellationToken): Promise<URI[]> {
+					return Promise.resolve(reportedResults
+						.map(relativePath => joinPath(options.folder, relativePath)));
+				}
+			});
+
+			const query: ISearchQuery = {
+				type: QueryType.File,
+
+				filePattern: '',
+				includePattern: { '**/*.ts': true },
+				excludePattern: {
+					'*.js': {
+						when: '$(basename).ts'
+					}
+				},
+				folderQueries: [
+					{ folder: rootFolderA }
+				]
+			};
+
+			const { results } = await runFileSearch(query);
+			compareURIs(
+				results,
+				[
+					joinPath(rootFolderA, 'foo/file1.ts')
 				]);
 		});
 

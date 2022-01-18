@@ -21,6 +21,7 @@ import { match } from 'vs/base/common/glob';
 import { LifecyclePhase } from 'vs/workbench/services/lifecycle/common/lifecycle';
 import { registerSingleton } from 'vs/platform/instantiation/common/extensions';
 import { IPathService } from 'vs/workbench/services/path/common/pathService';
+import { isProposedApiEnabled } from 'vs/workbench/services/extensions/common/extensions';
 
 const resourceLabelFormattersExtPoint = ExtensionsRegistry.registerExtensionPoint<ResourceLabelFormatter[]>({
 	extensionPoint: 'resourceLabelFormatters',
@@ -83,7 +84,7 @@ class ResourceLabelFormattersHandler implements IWorkbenchContribution {
 	constructor(@ILabelService labelService: ILabelService) {
 		resourceLabelFormattersExtPoint.setHandler((extensions, delta) => {
 			delta.added.forEach(added => added.value.forEach(formatter => {
-				if (!added.description.enableProposedApi && formatter.formatting.workspaceTooltip) {
+				if (!isProposedApiEnabled(added.description, 'contribLabelFormatterWorkspaceTooltip') && formatter.formatting.workspaceTooltip) {
 					// workspaceTooltip is only proposed
 					formatter.formatting.workspaceTooltip = undefined;
 				}
@@ -148,10 +149,7 @@ export class LabelService extends Disposable implements ILabelService {
 		// Without formatting we still need to support the separator
 		// as provided in options (https://github.com/microsoft/vscode/issues/130019)
 		if (!formatting && options.separator) {
-			switch (options.separator) {
-				case paths.win32.sep: return paths.win32.normalize(label);
-				case paths.posix.sep: return paths.posix.normalize(label);
-			}
+			return label.replace(sepRegexp, options.separator);
 		}
 
 		return label;

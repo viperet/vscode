@@ -8,7 +8,7 @@ import { EditOperation } from 'vs/editor/common/core/editOperation';
 import { Range } from 'vs/editor/common/core/range';
 import { TextModel } from 'vs/editor/common/model/textModel';
 import { LineInjectedText, ModelRawChange, RawContentChangedType } from 'vs/editor/common/model/textModelEvents';
-import { createTextModel } from 'vs/editor/test/common/editorTestUtils';
+import { createTextModel } from 'vs/editor/test/common/testTextModel';
 
 suite('Editor Model - Injected Text Events', () => {
 	let thisModel: TextModel;
@@ -35,6 +35,7 @@ suite('Editor Model - Injected Text Events', () => {
 			options: {
 				after: { content: 'injected1' },
 				description: 'test1',
+				showIfCollapsed: true
 			},
 			range: new Range(1, 1, 1, 1),
 		}]);
@@ -51,12 +52,14 @@ suite('Editor Model - Injected Text Events', () => {
 			options: {
 				after: { content: 'injected1' },
 				description: 'test1',
+				showIfCollapsed: true
 			},
 			range: new Range(2, 1, 2, 1),
 		}, {
 			options: {
 				after: { content: 'injected2' },
 				description: 'test2',
+				showIfCollapsed: true
 			},
 			range: new Range(2, 2, 2, 2),
 		}]);

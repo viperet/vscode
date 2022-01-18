@@ -3,8 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { ICredentialsService, ICredentialsProvider, ICredentialsChangeEvent } from 'vs/workbench/services/credentials/common/credentials';
-import { registerSingleton } from 'vs/platform/instantiation/common/extensions';
+import { ICredentialsService, ICredentialsProvider, ICredentialsChangeEvent } from 'vs/platform/credentials/common/credentials';
 import { IWorkbenchEnvironmentService } from 'vs/workbench/services/environment/common/environmentService';
 import { Emitter } from 'vs/base/common/event';
 import { Disposable } from 'vs/base/common/lifecycle';
@@ -54,6 +53,12 @@ export class BrowserCredentialsService extends Disposable implements ICredential
 	findCredentials(service: string): Promise<Array<{ account: string, password: string; }>> {
 		return this.credentialsProvider.findCredentials(service);
 	}
+
+	async clear(): Promise<void> {
+		if (this.credentialsProvider.clear) {
+			return this.credentialsProvider.clear();
+		}
+	}
 }
 
 interface ICredential {
@@ -80,7 +85,7 @@ class InMemoryCredentialsProvider implements ICredentialsProvider {
 	async deletePassword(service: string, account: string): Promise<boolean> {
 		const credential = this.doFindPassword(service, account);
 		if (credential) {
-			this.credentials = this.credentials.splice(this.credentials.indexOf(credential), 1);
+			this.credentials.splice(this.credentials.indexOf(credential), 1);
 		}
 
 		return !!credential;
@@ -102,6 +107,8 @@ class InMemoryCredentialsProvider implements ICredentialsProvider {
 			.filter(credential => credential.service === service)
 			.map(({ account, password }) => ({ account, password }));
 	}
-}
 
-registerSingleton(ICredentialsService, BrowserCredentialsService, true);
+	async clear(): Promise<void> {
+		this.credentials = [];
+	}
+}

@@ -153,7 +153,9 @@ export class MainThreadTunnelService extends Disposable implements MainThreadTun
 		return (await this.tunnelService.tunnels).map(tunnel => {
 			return {
 				remoteAddress: { port: tunnel.tunnelRemotePort, host: tunnel.tunnelRemoteHost },
-				localAddress: tunnel.localAddress
+				localAddress: tunnel.localAddress,
+				privacy: tunnel.privacy,
+				protocol: tunnel.protocol
 			};
 		});
 	}
@@ -162,7 +164,7 @@ export class MainThreadTunnelService extends Disposable implements MainThreadTun
 		this.remoteExplorerService.onFoundNewCandidates(candidates);
 	}
 
-	async $setTunnelProvider(features: TunnelProviderFeatures): Promise<void> {
+	async $setTunnelProvider(features?: TunnelProviderFeatures): Promise<void> {
 		const tunnelProvider: ITunnelProvider = {
 			forwardPort: (tunnelOptions: TunnelOptions, tunnelCreationOptions: TunnelCreationOptions) => {
 				const forward = this._proxy.$forwardPort(tunnelOptions, tunnelCreationOptions);
@@ -177,6 +179,7 @@ export class MainThreadTunnelService extends Disposable implements MainThreadTun
 						localAddress: typeof tunnel.localAddress === 'string' ? tunnel.localAddress : makeAddress(tunnel.localAddress.host, tunnel.localAddress.port),
 						tunnelLocalPort: typeof tunnel.localAddress !== 'string' ? tunnel.localAddress.port : undefined,
 						public: tunnel.public,
+						privacy: tunnel.privacy,
 						protocol: tunnel.protocol ?? TunnelProtocol.Http,
 						dispose: async (silent?: boolean) => {
 							this.logService.trace(`ForwardedPorts: (MainThreadTunnelService) Closing tunnel from tunnel provider: ${tunnel?.remoteAddress.host}:${tunnel?.remoteAddress.port}`);
@@ -186,7 +189,10 @@ export class MainThreadTunnelService extends Disposable implements MainThreadTun
 				});
 			}
 		};
-		this.tunnelService.setTunnelProvider(tunnelProvider, features);
+		this.tunnelService.setTunnelProvider(tunnelProvider);
+		if (features) {
+			this.tunnelService.setTunnelFeatures(features);
+		}
 	}
 
 	async $setCandidateFilter(): Promise<void> {
@@ -201,12 +207,12 @@ export class MainThreadTunnelService extends Disposable implements MainThreadTun
 			switch (source) {
 				case CandidatePortSource.None: {
 					Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration)
-						.registerDefaultConfigurations([{ 'remote.autoForwardPorts': false }]);
+						.registerDefaultConfigurations([{ overrides: { 'remote.autoForwardPorts': false } }]);
 					break;
 				}
 				case CandidatePortSource.Output: {
 					Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration)
-						.registerDefaultConfigurations([{ 'remote.autoForwardPortsSource': PORT_AUTO_SOURCE_SETTING_OUTPUT }]);
+						.registerDefaultConfigurations([{ overrides: { 'remote.autoForwardPortsSource': PORT_AUTO_SOURCE_SETTING_OUTPUT } }]);
 					break;
 				}
 				default: // Do nothing, the defaults for these settings should be used.

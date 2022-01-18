@@ -17,10 +17,10 @@ import { Progress } from 'vs/platform/progress/common/progress';
 import { IExtendedExtensionSearchOptions, SearchError, SearchErrorCode, serializeSearchError } from 'vs/workbench/services/search/common/search';
 import { Range, TextSearchComplete, TextSearchContext, TextSearchMatch, TextSearchOptions, TextSearchPreviewOptions, TextSearchQuery, TextSearchResult } from 'vs/workbench/services/search/common/searchExtTypes';
 import { AST as ReAST, RegExpParser, RegExpVisitor } from 'vscode-regexpp';
-import { rgPath } from 'vscode-ripgrep';
+import { rgPath } from '@vscode/ripgrep';
 import { anchorGlob, createTextSearchResult, IOutputChannel, Maybe } from './ripgrepSearchUtils';
 
-// If vscode-ripgrep is in an .asar file, then the binary is unpacked.
+// If @vscode/ripgrep is in an .asar file, then the binary is unpacked.
 const rgDiskPath = rgPath.replace(/\bnode_modules\.asar\b/, 'node_modules.asar.unpacked');
 
 export class RipgrepTextSearchEngine {
@@ -403,7 +403,9 @@ function getRgArgs(query: TextSearchQuery, options: TextSearchOptions): string[]
 	}
 
 	if (options.useIgnoreFiles) {
-		args.push('--no-ignore-parent');
+		if (!options.useParentIgnoreFiles) {
+			args.push('--no-ignore-parent');
+		}
 	} else {
 		// Don't use .gitignore or .ignore
 		args.push('--no-ignore');
@@ -438,7 +440,7 @@ function getRgArgs(query: TextSearchQuery, options: TextSearchOptions): string[]
 
 	if (query.isRegExp) {
 		query.pattern = unicodeEscapesToPCRE2(query.pattern);
-		args.push('--auto-hybrid-regex');
+		args.push('--engine', 'auto');
 	}
 
 	let searchPatternAfterDoubleDashes: Maybe<string>;
@@ -569,7 +571,15 @@ export function fixRegexNewline(pattern: string): string {
 				if (parent.negate) {
 					// negative bracket expr, [^a-z\n] -> (?![a-z]|\r?\n)
 					const otherContent = pattern.slice(parent.start + 2, char.start) + pattern.slice(char.end, parent.end - 1);
-					replace(parent.start, parent.end, '(?!\\r?\\n' + (otherContent ? `|[${otherContent}]` : '') + ')');
+					if (parent.parent?.type === 'Quantifier') {
+						// If quantified, we can't use a negative lookahead in a quantifier.
+						// But `.` already doesn't match new lines, so we can just use that
+						// (with any other negations) instead.
+						const quant = parent.parent;
+						replace(quant.start, quant.end, (otherContent ? `[^${otherContent}]` : '.') + (quant.greedy ? '+' : '*'));
+					} else {
+						replace(parent.start, parent.end, '(?!\\r?\\n' + (otherContent ? `|[${otherContent}]` : '') + ')');
+					}
 				} else {
 					// positive bracket expr, [a-z\n] -> (?:[a-z]|\r?\n)
 					const otherContent = pattern.slice(parent.start + 1, char.start) + pattern.slice(char.end, parent.end - 1);

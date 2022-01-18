@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import * as nls from 'vs/nls';
-import { StatusbarAlignment, IStatusbarService, IStatusbarEntryAccessor } from 'vs/workbench/services/statusbar/common/statusbar';
+import { StatusbarAlignment, IStatusbarService, IStatusbarEntryAccessor } from 'vs/workbench/services/statusbar/browser/statusbar';
 import { Disposable, MutableDisposable } from 'vs/base/common/lifecycle';
 import { parseKeyboardLayoutDescription, areKeyboardLayoutsEqual, getKeyboardLayoutId, IKeyboardLayoutService, IKeyboardLayoutInfo } from 'vs/platform/keyboardLayout/common/keyboardLayout';
 import { LifecyclePhase } from 'vs/workbench/services/lifecycle/common/lifecycle';
@@ -51,7 +51,7 @@ export class KeyboardLayoutPickerContribution extends Disposable implements IWor
 			);
 		}
 
-		this._register(keyboardLayoutService.onDidChangeKeyboardLayout(() => {
+		this._register(this.keyboardLayoutService.onDidChangeKeyboardLayout(() => {
 			let layout = this.keyboardLayoutService.getCurrentKeyboardLayout();
 			let layoutInfo = parseKeyboardLayoutDescription(layout);
 
@@ -178,7 +178,7 @@ export class KeyboardLayoutPickerAction extends Action {
 				}
 				return this.editorService.openEditor({
 					resource: stat.resource,
-					mode: 'jsonc',
+					languageId: 'jsonc',
 					options: { pinned: true }
 				});
 			}, (error) => {

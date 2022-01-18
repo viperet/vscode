@@ -6,13 +6,15 @@
 import * as extHostProtocol from 'vs/workbench/api/common/extHost.protocol';
 import { NotebookCellTextModel } from 'vs/workbench/contrib/notebook/common/model/notebookCellTextModel';
 import * as notebookCommon from 'vs/workbench/contrib/notebook/common/notebookCommon';
+import { CellExecutionUpdateType } from 'vs/workbench/contrib/notebook/common/notebookExecutionService';
+import { ICellExecuteUpdate, ICellExecutionComplete } from 'vs/workbench/contrib/notebook/common/notebookExecutionStateService';
 
 export namespace NotebookDto {
 
 	export function toNotebookOutputItemDto(item: notebookCommon.IOutputItemDto): extHostProtocol.NotebookOutputItemDto {
 		return {
 			mime: item.mime,
-			valueBytes: Array.from(item.data)
+			valueBytes: item.data
 		};
 	}
 
@@ -46,7 +48,7 @@ export namespace NotebookDto {
 	export function fromNotebookOutputItemDto(item: extHostProtocol.NotebookOutputItemDto): notebookCommon.IOutputItemDto {
 		return {
 			mime: item.mime,
-			data: new Uint8Array(item.valueBytes)
+			data: item.valueBytes
 		};
 	}
 
@@ -91,24 +93,28 @@ export namespace NotebookDto {
 		};
 	}
 
-	export function fromCellExecuteEditDto(data: extHostProtocol.CellExecuteEditDto): notebookCommon.IImmediateCellEditOperation {
-		if (data.editType === notebookCommon.CellEditType.PartialInternalMetadata) {
-			return data;
-		} else if (data.editType === notebookCommon.CellEditType.Output) {
+	export function fromCellExecuteUpdateDto(data: extHostProtocol.ICellExecuteUpdateDto): ICellExecuteUpdate {
+		if (data.editType === CellExecutionUpdateType.Output) {
 			return {
 				editType: data.editType,
-				handle: data.handle,
+				cellHandle: data.cellHandle,
 				append: data.append,
 				outputs: data.outputs.map(fromNotebookOutputDto)
 			};
-		} else {
+		} else if (data.editType === CellExecutionUpdateType.OutputItems) {
 			return {
 				editType: data.editType,
 				append: data.append,
 				outputId: data.outputId,
 				items: data.items.map(fromNotebookOutputItemDto)
 			};
+		} else {
+			return data;
 		}
+	}
+
+	export function fromCellExecuteCompleteDto(data: extHostProtocol.ICellExecutionCompleteDto): ICellExecutionComplete {
+		return data;
 	}
 
 	export function fromCellEditOperationDto(edit: extHostProtocol.ICellEditOperationDto): notebookCommon.ICellEditOperation {

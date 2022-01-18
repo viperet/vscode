@@ -10,7 +10,7 @@ import { MessageType } from 'vs/base/browser/ui/inputbox/inputBox';
 import { IIdentityProvider } from 'vs/base/browser/ui/list/list';
 import { Orientation } from 'vs/base/browser/ui/sash/sash';
 import { ITreeContextMenuEvent, ITreeElement } from 'vs/base/browser/ui/tree/tree';
-import { ActionRunner, IAction } from 'vs/base/common/actions';
+import { IAction } from 'vs/base/common/actions';
 import { Delayer } from 'vs/base/common/async';
 import { Color, RGBA } from 'vs/base/common/color';
 import * as errors from 'vs/base/common/errors';
@@ -23,7 +23,7 @@ import * as strings from 'vs/base/common/strings';
 import { withNullAsUndefined } from 'vs/base/common/types';
 import { URI } from 'vs/base/common/uri';
 import 'vs/css!./media/searchview';
-import { getCodeEditor, ICodeEditor, isCodeEditor, isDiffEditor } from 'vs/editor/browser/editorBrowser';
+import { getCodeEditor, isCodeEditor, isDiffEditor } from 'vs/editor/browser/editorBrowser';
 import { ICodeEditorService } from 'vs/editor/browser/services/codeEditorService';
 import { EmbeddedCodeEditorWidget } from 'vs/editor/browser/widget/embeddedCodeEditorWidget';
 import { IEditorOptions } from 'vs/editor/common/config/editorOptions';
@@ -319,8 +319,8 @@ export class SearchView extends ViewPane {
 		dom.append(folderIncludesList, $('h4', undefined, filesToIncludeTitle));
 
 		this.inputPatternIncludes = this._register(this.instantiationService.createInstance(IncludePatternInputWidget, folderIncludesList, this.contextViewService, {
-			ariaLabel: nls.localize('label.includes', 'Search Include Patterns'),
-			placeholder: nls.localize('placeholder.includes', "(e.g. *.ts, src/**/include)"),
+			ariaLabel: filesToIncludeTitle,
+			placeholder: nls.localize('placeholder.includes', "e.g. *.ts, src/**/include"),
 			showPlaceholderOnFocus: true,
 			history: patternIncludesHistory,
 		}));
@@ -338,8 +338,8 @@ export class SearchView extends ViewPane {
 		const excludesTitle = nls.localize('searchScope.excludes', "files to exclude");
 		dom.append(excludesList, $('h4', undefined, excludesTitle));
 		this.inputPatternExcludes = this._register(this.instantiationService.createInstance(ExcludePatternInputWidget, excludesList, this.contextViewService, {
-			ariaLabel: nls.localize('label.excludes', 'Search Exclude Patterns'),
-			placeholder: nls.localize('placeholder.excludes', "(e.g. *.ts, src/**/exclude)"),
+			ariaLabel: excludesTitle,
+			placeholder: nls.localize('placeholder.excludes', "e.g. *.ts, src/**/exclude"),
 			showPlaceholderOnFocus: true,
 			history: patternExclusionsHistory,
 		}));
@@ -505,7 +505,7 @@ export class SearchView extends ViewPane {
 
 	private refreshAndUpdateCount(event?: IChangeEvent): void {
 		this.searchWidget.setReplaceAllActionState(!this.viewModel.searchResult.isEmpty());
-		this.updateSearchResultCount(this.viewModel.searchResult.query!.userDisabledExcludesAndIgnoreFiles);
+		this.updateSearchResultCount(this.viewModel.searchResult.query!.userDisabledExcludesAndIgnoreFiles, this.viewModel.searchResult.query?.onlyOpenEditors);
 		return this.refreshTree(event);
 	}
 
@@ -614,7 +614,7 @@ export class SearchView extends ViewPane {
 					this.reLayout();
 				}, (error) => {
 					progressComplete();
-					errors.isPromiseCanceledError(error);
+					errors.isCancellationError(error);
 					this.notificationService.error(error);
 				});
 			}
@@ -912,8 +912,8 @@ export class SearchView extends ViewPane {
 	updateTextFromFindWidgetOrSelection({ allowUnselectedWord = true, allowSearchOnType = true }): boolean {
 		let activeEditor = this.editorService.activeTextEditorControl;
 		if (isCodeEditor(activeEditor) && !activeEditor?.hasTextFocus()) {
-			const controller = CommonFindController.get(activeEditor as ICodeEditor);
-			if (controller.isFindInputFocused()) {
+			const controller = CommonFindController.get(activeEditor);
+			if (controller && controller.isFindInputFocused()) {
 				return this.updateTextFromFindWidget(controller, { allowSearchOnType });
 			}
 
@@ -1292,7 +1292,7 @@ export class SearchView extends ViewPane {
 		this.searchWidget.focus(false);
 	}
 
-	triggerQueryChange(_options?: { preserveFocus?: boolean, triggeredOnType?: boolean, delay?: number }) {
+	triggerQueryChange(_options?: { preserveFocus?: boolean, triggeredOnType?: boolean, delay?: number; }) {
 		const options = { preserveFocus: true, triggeredOnType: false, delay: 0, ..._options };
 
 		if (options.triggeredOnType && !this.searchConfig.searchOnType) { return; }
@@ -1537,7 +1537,7 @@ export class SearchView extends ViewPane {
 		const onError = (e: any) => {
 			clearTimeout(slowTimer);
 			this.state = SearchUIState.Idle;
-			if (errors.isPromiseCanceledError(e)) {
+			if (errors.isCancellationError(e)) {
 				return onComplete(undefined);
 			} else {
 				progressComplete();
@@ -1567,13 +1567,14 @@ export class SearchView extends ViewPane {
 
 		this.searchWidget.setReplaceAllActionState(false);
 
+		this.tree.setSelection([]);
 		return this.viewModel.search(query)
 			.then(onComplete, onError);
 	}
 
 	private onOpenSettings(e: dom.EventLike): void {
 		dom.EventHelper.stop(e, false);
-		this.openSettings('@id:files.exclude,search.exclude,search.useGlobalIgnoreFiles,search.useIgnoreFiles');
+		this.openSettings('@id:files.exclude,search.exclude,search.useParentIgnoreFiles,search.useGlobalIgnoreFiles,search.useIgnoreFiles');
 	}
 
 	private openSettings(query: string): Promise<IEditorPane | undefined> {
@@ -1600,7 +1601,12 @@ export class SearchView extends ViewPane {
 		this.searchExcludePattern.setUseExcludesAndIgnoreFiles(true);
 	}
 
-	private updateSearchResultCount(disregardExcludesAndIgnores?: boolean): void {
+	private onDisableSearchInOpenEditors(): void {
+		this.toggleQueryDetails(false, true);
+		this.inputPatternIncludes.setOnlySearchInOpenEditors(false);
+	}
+
+	private updateSearchResultCount(disregardExcludesAndIgnores?: boolean, onlyOpenEditors?: boolean): void {
 		const fileCount = this.viewModel.searchResult.fileCount();
 		this.hasSearchResultsKey.set(fileCount > 0);
 
@@ -1616,6 +1622,12 @@ export class SearchView extends ViewPane {
 				const excludesDisabledMessage = ' - ' + nls.localize('useIgnoresAndExcludesDisabled', "exclude settings and ignore files are disabled") + ' ';
 				const enableExcludesButton = this.messageDisposables.add(new SearchLinkButton(nls.localize('excludes.enable', "enable"), this.onEnableExcludes.bind(this), nls.localize('useExcludesAndIgnoreFilesDescription', "Use Exclude Settings and Ignore Files")));
 				dom.append(messageEl, $('span', undefined, excludesDisabledMessage, '(', enableExcludesButton.element, ')'));
+			}
+
+			if (onlyOpenEditors) {
+				const searchingInOpenMessage = ' - ' + nls.localize('onlyOpenEditors', "searching only in open files") + ' ';
+				const disableOpenEditorsButton = this.messageDisposables.add(new SearchLinkButton(nls.localize('openEditors.disable', "disable"), this.onDisableSearchInOpenEditors.bind(this), nls.localize('disableOpenEditors', "Search in entire workspace")));
+				dom.append(messageEl, $('span', undefined, searchingInOpenMessage, '(', disableOpenEditorsButton.element, ')'));
 			}
 
 			dom.append(messageEl, ' - ');
@@ -1659,20 +1671,10 @@ export class SearchView extends ViewPane {
 		const textEl = dom.append(this.searchWithoutFolderMessageElement,
 			$('p', undefined, nls.localize('searchWithoutFolder', "You have not opened or specified a folder. Only open files are currently searched - ")));
 
-		const actionRunner = this.messageDisposables.add(new ActionRunner());
 		const openFolderButton = this.messageDisposables.add(new SearchLinkButton(
 			nls.localize('openFolder', "Open Folder"),
 			() => {
-				const action = env.isMacintosh ?
-					this.instantiationService.createInstance(OpenFileFolderAction, OpenFileFolderAction.ID, OpenFileFolderAction.LABEL) :
-					this.instantiationService.createInstance(OpenFolderAction, OpenFolderAction.ID, OpenFolderAction.LABEL);
-
-				actionRunner.run(action).then(() => {
-					action.dispose();
-				}, err => {
-					action.dispose();
-					errors.onUnexpectedError(err);
-				});
+				this.commandService.executeCommand(env.isMacintosh && env.isNative ? OpenFileFolderAction.ID : OpenFolderAction.ID).catch(err => errors.onUnexpectedError(err));
 			}));
 		dom.append(textEl, openFolderButton.element);
 	}
@@ -1746,7 +1748,7 @@ export class SearchView extends ViewPane {
 					const codeEditor = getCodeEditor(editor.getControl());
 					if (codeEditor) {
 						const multiCursorController = MultiCursorSelectionController.get(codeEditor);
-						multiCursorController.selectAllUsingSelections(selections);
+						multiCursorController?.selectAllUsingSelections(selections);
 					}
 				}
 			}

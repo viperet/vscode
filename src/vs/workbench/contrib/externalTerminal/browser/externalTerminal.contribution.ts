@@ -17,7 +17,6 @@ import { Schemas } from 'vs/base/common/network';
 import { distinct } from 'vs/base/common/arrays';
 import { IEditorService } from 'vs/workbench/services/editor/common/editorService';
 import { IRemoteAgentService } from 'vs/workbench/services/remote/common/remoteAgentService';
-import { optional } from 'vs/platform/instantiation/common/instantiation';
 import { ContextKeyExpr } from 'vs/platform/contextkey/common/contextkey';
 import { IWorkbenchContribution, IWorkbenchContributionsRegistry, Extensions as WorkbenchExtensions } from 'vs/workbench/common/contributions';
 import { Disposable } from 'vs/base/common/lifecycle';
@@ -26,6 +25,7 @@ import { dirname, basename } from 'vs/base/common/path';
 import { LifecyclePhase } from 'vs/workbench/services/lifecycle/common/lifecycle';
 import { Registry } from 'vs/platform/registry/common/platform';
 import { IExternalTerminalConfiguration, IExternalTerminalService } from 'vs/platform/externalTerminal/common/externalTerminal';
+import { TerminalLocation } from 'vs/platform/terminal/common/terminal';
 
 const OPEN_IN_TERMINAL_COMMAND_ID = 'openInTerminal';
 CommandsRegistry.registerCommand({
@@ -34,10 +34,14 @@ CommandsRegistry.registerCommand({
 		const configurationService = accessor.get(IConfigurationService);
 		const editorService = accessor.get(IEditorService);
 		const fileService = accessor.get(IFileService);
-		const terminalService: IExternalTerminalService | undefined = accessor.get(IExternalTerminalService, optional);
 		const integratedTerminalService = accessor.get(IIntegratedTerminalService);
 		const remoteAgentService = accessor.get(IRemoteAgentService);
 		const terminalGroupService = accessor.get(ITerminalGroupService);
+		let externalTerminalService: IExternalTerminalService | undefined = undefined;
+		try {
+			externalTerminalService = accessor.get(IExternalTerminalService);
+		} catch {
+		}
 
 		const resources = getMultiSelectedResources(resource, accessor.get(IListService), editorService, accessor.get(IExplorerService));
 		return fileService.resolveAll(resources.map(r => ({ resource: r }))).then(async stats => {
@@ -67,14 +71,14 @@ CommandsRegistry.registerCommand({
 					}
 					opened[cwd.path] = true;
 					const instance = await integratedTerminalService.createTerminal({ config: { cwd } });
-					if (instance && (resources.length === 1 || !resource || cwd.path === resource.path || cwd.path === dirname(resource.path))) {
+					if (instance && instance.target !== TerminalLocation.Editor && (resources.length === 1 || !resource || cwd.path === resource.path || cwd.path === dirname(resource.path))) {
 						integratedTerminalService.setActiveInstance(instance);
 						terminalGroupService.showPanel(true);
 					}
 				}
-			} else {
+			} else if (externalTerminalService) {
 				distinct(targets.map(({ stat }) => stat!.isDirectory ? stat!.resource.fsPath : dirname(stat!.resource.fsPath))).forEach(cwd => {
-					terminalService!.openTerminal(config.terminal.external, cwd);
+					externalTerminalService!.openTerminal(config.terminal.external, cwd);
 				});
 			}
 		});

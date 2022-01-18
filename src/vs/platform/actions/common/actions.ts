@@ -96,10 +96,12 @@ export class MenuId {
 	static readonly EditorTitle = new MenuId('EditorTitle');
 	static readonly EditorTitleRun = new MenuId('EditorTitleRun');
 	static readonly EditorTitleContext = new MenuId('EditorTitleContext');
+	static readonly EmptyEditorGroup = new MenuId('EmptyEditorGroup');
 	static readonly EmptyEditorGroupContext = new MenuId('EmptyEditorGroupContext');
 	static readonly ExplorerContext = new MenuId('ExplorerContext');
 	static readonly ExtensionContext = new MenuId('ExtensionContext');
 	static readonly GlobalActivity = new MenuId('GlobalActivity');
+	static readonly LayoutControlMenu = new MenuId('LayoutControlMenu');
 	static readonly MenubarMainMenu = new MenuId('MenubarMainMenu');
 	static readonly MenubarAppearanceMenu = new MenuId('MenubarAppearanceMenu');
 	static readonly MenubarDebugMenu = new MenuId('MenubarDebugMenu');
@@ -110,6 +112,7 @@ export class MenuId {
 	static readonly MenubarHelpMenu = new MenuId('MenubarHelpMenu');
 	static readonly MenubarLayoutMenu = new MenuId('MenubarLayoutMenu');
 	static readonly MenubarNewBreakpointMenu = new MenuId('MenubarNewBreakpointMenu');
+	static readonly MenubarPanelAlignmentMenu = new MenuId('MenubarPanelAlignmentMenu');
 	static readonly MenubarPreferencesMenu = new MenuId('MenubarPreferencesMenu');
 	static readonly MenubarRecentMenu = new MenuId('MenubarRecentMenu');
 	static readonly MenubarSelectionMenu = new MenuId('MenubarSelectionMenu');
@@ -136,6 +139,7 @@ export class MenuId {
 	static readonly TouchBarContext = new MenuId('TouchBarContext');
 	static readonly TitleBarContext = new MenuId('TitleBarContext');
 	static readonly TunnelContext = new MenuId('TunnelContext');
+	static readonly TunnelPrivacy = new MenuId('TunnelPrivacy');
 	static readonly TunnelProtocol = new MenuId('TunnelProtocol');
 	static readonly TunnelPortInline = new MenuId('TunnelInline');
 	static readonly TunnelTitle = new MenuId('TunnelTitle');
@@ -160,10 +164,12 @@ export class MenuId {
 	static readonly NotebookCellBetween = new MenuId('NotebookCellBetween');
 	static readonly NotebookCellListTop = new MenuId('NotebookCellTop');
 	static readonly NotebookCellExecute = new MenuId('NotebookCellExecute');
+	static readonly NotebookCellExecutePrimary = new MenuId('NotebookCellExecutePrimary');
 	static readonly NotebookDiffCellInputTitle = new MenuId('NotebookDiffCellInputTitle');
 	static readonly NotebookDiffCellMetadataTitle = new MenuId('NotebookDiffCellMetadataTitle');
 	static readonly NotebookDiffCellOutputsTitle = new MenuId('NotebookDiffCellOutputsTitle');
 	static readonly NotebookOutputToolbar = new MenuId('NotebookOutputToolbar');
+	static readonly NotebookEditorLayoutConfigure = new MenuId('NotebookEditorLayoutConfigure');
 	static readonly BulkEditTitle = new MenuId('BulkEditTitle');
 	static readonly BulkEditContext = new MenuId('BulkEditContext');
 	static readonly TimelineItemContext = new MenuId('TimelineItemContext');
@@ -172,6 +178,7 @@ export class MenuId {
 	static readonly AccountsContext = new MenuId('AccountsContext');
 	static readonly PanelTitle = new MenuId('PanelTitle');
 	static readonly TerminalInstanceContext = new MenuId('TerminalInstanceContext');
+	static readonly TerminalEditorInstanceContext = new MenuId('TerminalEditorInstanceContext');
 	static readonly TerminalNewDropdownContext = new MenuId('TerminalNewDropdownContext');
 	static readonly TerminalTabContext = new MenuId('TerminalTabContext');
 	static readonly TerminalTabEmptyAreaContext = new MenuId('TerminalTabEmptyAreaContext');
@@ -202,11 +209,16 @@ export interface IMenu extends IDisposable {
 
 export const IMenuService = createDecorator<IMenuService>('menuService');
 
+export interface IMenuCreateOptions {
+	emitEventsForSubmenuChanges?: boolean;
+	eventDebounceDelay?: number;
+}
+
 export interface IMenuService {
 
 	readonly _serviceBrand: undefined;
 
-	createMenu(id: MenuId, contextKeyService: IContextKeyService, emitEventsForSubmenuChanges?: boolean): IMenu;
+	createMenu(id: MenuId, contextKeyService: IContextKeyService, options?: IMenuCreateOptions): IMenu;
 }
 
 export type ICommandsMap = Map<string, ICommandAction>;
@@ -392,7 +404,7 @@ export class MenuItemAction implements IAction {
 	readonly tooltip: string;
 	readonly class: string | undefined;
 	readonly enabled: boolean;
-	readonly checked: boolean;
+	readonly checked?: boolean;
 
 	constructor(
 		item: ICommandAction,
@@ -407,7 +419,7 @@ export class MenuItemAction implements IAction {
 			: (typeof item.title === 'string' ? item.title : item.title.value);
 		this.tooltip = (typeof item.tooltip === 'string' ? item.tooltip : item.tooltip?.value) ?? '';
 		this.enabled = !item.precondition || contextKeyService.contextMatchesRules(item.precondition);
-		this.checked = false;
+		this.checked = undefined;
 
 		if (item.toggled) {
 			const toggled = ((item.toggled as { condition: ContextKeyExpression }).condition ? item.toggled : { condition: item.toggled }) as {

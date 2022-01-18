@@ -20,12 +20,15 @@ import { IOpenerService } from 'vs/platform/opener/common/opener';
 import { IHostService } from 'vs/workbench/services/host/browser/host';
 import Severity from 'vs/base/common/severity';
 import { coalesce, distinct } from 'vs/base/common/arrays';
-import { compareIgnoreCase, trim } from 'vs/base/common/strings';
-import { IModeService } from 'vs/editor/common/services/modeService';
+import { trim } from 'vs/base/common/strings';
+import { ILanguageService } from 'vs/editor/common/services/language';
 import { ILabelService } from 'vs/platform/label/common/label';
 import { IPathService } from 'vs/workbench/services/path/common/pathService';
 import { Schemas } from 'vs/base/common/network';
-import { PLAINTEXT_EXTENSION } from 'vs/editor/common/modes/modesRegistry';
+import { PLAINTEXT_EXTENSION } from 'vs/editor/common/languages/modesRegistry';
+import { ICommandService } from 'vs/platform/commands/common/commands';
+import { ICodeEditorService } from 'vs/editor/browser/services/codeEditorService';
+import { IEditorService } from 'vs/workbench/services/editor/common/editorService';
 
 export abstract class AbstractFileDialogService implements IFileDialogService {
 
@@ -40,11 +43,14 @@ export abstract class AbstractFileDialogService implements IFileDialogService {
 		@IConfigurationService protected readonly configurationService: IConfigurationService,
 		@IFileService protected readonly fileService: IFileService,
 		@IOpenerService protected readonly openerService: IOpenerService,
-		@IDialogService private readonly dialogService: IDialogService,
-		@IModeService private readonly modeService: IModeService,
+		@IDialogService protected readonly dialogService: IDialogService,
+		@ILanguageService private readonly languageService: ILanguageService,
 		@IWorkspacesService private readonly workspacesService: IWorkspacesService,
 		@ILabelService private readonly labelService: ILabelService,
-		@IPathService private readonly pathService: IPathService
+		@IPathService private readonly pathService: IPathService,
+		@ICommandService protected readonly commandService: ICommandService,
+		@IEditorService protected readonly editorService: IEditorService,
+		@ICodeEditorService protected readonly codeEditorService: ICodeEditorService
 	) { }
 
 	async defaultFilePath(schemeFilter = this.getSchemeFilterForWindow()): Promise<URI> {
@@ -113,7 +119,7 @@ export abstract class AbstractFileDialogService implements IFileDialogService {
 		return this.doShowSaveConfirm(fileNamesOrResources);
 	}
 
-	protected async doShowSaveConfirm(fileNamesOrResources: (string | URI)[]): Promise<ConfirmResult> {
+	private async doShowSaveConfirm(fileNamesOrResources: (string | URI)[]): Promise<ConfirmResult> {
 		if (fileNamesOrResources.length === 0) {
 			return ConfirmResult.DONT_SAVE;
 		}
@@ -145,7 +151,7 @@ export abstract class AbstractFileDialogService implements IFileDialogService {
 		}
 	}
 
-	protected addFileSchemaIfNeeded(schema: string): string[] {
+	protected addFileSchemaIfNeeded(schema: string, _isFolder?: boolean): string[] {
 		return schema === Schemas.untitled ? [Schemas.file] : (schema !== Schemas.file ? [schema, Schemas.file] : [schema]);
 	}
 
@@ -197,7 +203,7 @@ export abstract class AbstractFileDialogService implements IFileDialogService {
 
 	protected async pickFolderAndOpenSimplified(schema: string, options: IPickAndOpenOptions): Promise<void> {
 		const title = nls.localize('openFolder.title', 'Open Folder');
-		const availableFileSystems = this.addFileSchemaIfNeeded(schema);
+		const availableFileSystems = this.addFileSchemaIfNeeded(schema, true);
 
 		const uri = await this.pickResource({ canSelectFiles: false, canSelectFolders: true, canSelectMany: false, defaultUri: options.defaultUri, title, availableFileSystems });
 		if (uri) {
@@ -206,9 +212,9 @@ export abstract class AbstractFileDialogService implements IFileDialogService {
 	}
 
 	protected async pickWorkspaceAndOpenSimplified(schema: string, options: IPickAndOpenOptions): Promise<void> {
-		const title = nls.localize('openWorkspace.title', 'Open Workspace');
+		const title = nls.localize('openWorkspace.title', 'Open Workspace from File');
 		const filters: FileFilter[] = [{ name: nls.localize('filterName.workspace', 'Workspace'), extensions: [WORKSPACE_EXTENSION] }];
-		const availableFileSystems = this.addFileSchemaIfNeeded(schema);
+		const availableFileSystems = this.addFileSchemaIfNeeded(schema, true);
 
 		const uri = await this.pickResource({ canSelectFiles: true, canSelectFolders: false, canSelectMany: false, defaultUri: options.defaultUri, title, filters, availableFileSystems });
 		if (uri) {
@@ -235,7 +241,7 @@ export abstract class AbstractFileDialogService implements IFileDialogService {
 
 	protected async showOpenDialogSimplified(schema: string, options: IOpenDialogOptions): Promise<URI[] | undefined> {
 		if (!options.availableFileSystems) {
-			options.availableFileSystems = this.addFileSchemaIfNeeded(schema);
+			options.availableFileSystems = this.addFileSchemaIfNeeded(schema, options.canSelectFolders);
 		}
 
 		const uri = await this.pickResource(options);
@@ -255,7 +261,7 @@ export abstract class AbstractFileDialogService implements IFileDialogService {
 		return this.getSimpleFileDialog().showSaveDialog(options);
 	}
 
-	protected getSchemeFilterForWindow(defaultUriScheme?: string): string {
+	private getSchemeFilterForWindow(defaultUriScheme?: string): string {
 		return defaultUriScheme ?? this.pathService.defaultUriScheme;
 	}
 
@@ -295,10 +301,10 @@ export abstract class AbstractFileDialogService implements IFileDialogService {
 		const ext: string | undefined = defaultUri ? resources.extname(defaultUri) : undefined;
 		let matchingFilter: IFilter | undefined;
 
-		const registeredLanguageNames = this.modeService.getRegisteredLanguageNames().sort((a, b) => compareIgnoreCase(a, b));
-		const registeredLanguageFilters: IFilter[] = coalesce(registeredLanguageNames.map(languageName => {
-			const extensions = this.modeService.getExtensions(languageName);
-			if (!extensions || !extensions.length) {
+		const registeredLanguageNames = this.languageService.getSortedRegisteredLanguageNames();
+		const registeredLanguageFilters: IFilter[] = coalesce(registeredLanguageNames.map(({ languageName, languageId }) => {
+			const extensions = this.languageService.getExtensions(languageId);
+			if (!extensions.length) {
 				return null;
 			}
 

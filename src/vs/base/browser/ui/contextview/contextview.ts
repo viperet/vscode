@@ -130,7 +130,7 @@ export class ContextView extends Disposable {
 	private shadowRoot: ShadowRoot | null = null;
 	private shadowRootHostElement: HTMLElement | null = null;
 
-	constructor(container: HTMLElement, domPosition: ContextViewDOMPosition) {
+	constructor(container: HTMLElement | null, domPosition: ContextViewDOMPosition) {
 		super();
 
 		this.view = DOM.$('.context-view');
@@ -365,6 +365,7 @@ let SHADOW_ROOT_CSS = /* css */ `
 
 	@font-face {
 		font-family: "codicon";
+		font-display: block;
 		src: url("./codicon.ttf?5d4d76ab2ce5108968ad644d591a16a6") format("truetype");
 	}
 

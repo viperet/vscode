@@ -19,7 +19,7 @@ import { TypeScriptVersionManager } from './tsServer/versionManager';
 import { ITypeScriptVersionProvider, TypeScriptVersion } from './tsServer/versionProvider';
 import { ClientCapabilities, ClientCapability, ExecConfig, ITypeScriptServiceClient, ServerResponse, TypeScriptRequests } from './typescriptService';
 import API from './utils/api';
-import { areServiceConfigurationsEqual, SeparateSyntaxServerConfiguration, ServiceConfigurationProvider, TsServerLogLevel, TypeScriptServiceConfiguration } from './utils/configuration';
+import { areServiceConfigurationsEqual, ServiceConfigurationProvider, SyntaxServerConfiguration, TsServerLogLevel, TypeScriptServiceConfiguration } from './utils/configuration';
 import { Disposable } from './utils/dispose';
 import * as fileSchemes from './utils/fileSchemes';
 import { Logger } from './utils/logger';
@@ -225,7 +225,7 @@ export default class TypeScriptServiceClient extends Disposable implements IType
 	}
 
 	public get capabilities() {
-		if (this._configuration.separateSyntaxServer === SeparateSyntaxServerConfiguration.ForAllRequests) {
+		if (this._configuration.useSyntaxServer === SyntaxServerConfiguration.Always) {
 			return new ClientCapabilities(
 				ClientCapability.Syntax,
 				ClientCapability.EnhancedSyntax);
@@ -681,7 +681,9 @@ export default class TypeScriptServiceClient extends Disposable implements IType
 				}
 			default:
 				{
-					return this.inMemoryResourcePrefix + resource.toString(true);
+					return this.inMemoryResourcePrefix + '/' + resource.scheme
+						+ (resource.path.startsWith('/') ? resource.path : '/' + resource.path)
+						+ (resource.fragment ? '#' + resource.fragment : '');
 				}
 		}
 	}
@@ -720,22 +722,28 @@ export default class TypeScriptServiceClient extends Disposable implements IType
 
 	public toResource(filepath: string): vscode.Uri {
 		if (isWeb()) {
-			// On web, treat absolute paths as pointing to standard lib files
-			if (filepath.startsWith('/')) {
+			// On web, the stdlib paths that TS return look like: '/lib.es2015.collection.d.ts'
+			if (filepath.startsWith('/lib.') && filepath.endsWith('.d.ts')) {
 				return vscode.Uri.joinPath(this.context.extensionUri, 'dist', 'browser', 'typescript', filepath.slice(1));
 			}
 		}
 
 		if (filepath.startsWith(this.inMemoryResourcePrefix)) {
-			const resource = vscode.Uri.parse(filepath.slice(1));
-			return this.bufferSyncSupport.toVsCodeResource(resource);
+			const parts = filepath.match(/^\^\/([^\/]+)\/(.+)$/);
+			if (parts) {
+				const resource = vscode.Uri.parse(parts[1] + ':' + parts[2]);
+				return this.bufferSyncSupport.toVsCodeResource(resource);
+			}
 		}
 		return this.bufferSyncSupport.toResource(filepath);
 	}
 
 	public getWorkspaceRootForResource(resource: vscode.Uri): string | undefined {
 		const roots = vscode.workspace.workspaceFolders ? Array.from(vscode.workspace.workspaceFolders) : undefined;
-		if (!roots || !roots.length) {
+		if (!roots?.length) {
+			if (resource.scheme === fileSchemes.officeScript) {
+				return '/';
+			}
 			return undefined;
 		}
 
@@ -743,6 +751,9 @@ export default class TypeScriptServiceClient extends Disposable implements IType
 			case fileSchemes.file:
 			case fileSchemes.untitled:
 			case fileSchemes.vscodeNotebookCell:
+			case fileSchemes.memFs:
+			case fileSchemes.vscodeVfs:
+			case fileSchemes.officeScript:
 				for (const root of roots.sort((a, b) => a.uri.fsPath.length - b.uri.fsPath.length)) {
 					if (resource.fsPath.startsWith(root.uri.fsPath + path.sep)) {
 						return root.uri.fsPath;
@@ -859,7 +870,7 @@ export default class TypeScriptServiceClient extends Disposable implements IType
 		switch (event.event) {
 			case EventName.syntaxDiag:
 			case EventName.semanticDiag:
-			case EventName.suggestionDiag:
+			case EventName.suggestionDiag: {
 				// This event also roughly signals that projects have been loaded successfully (since the TS server is synchronous)
 				this.loadingIndicator.reset();
 
@@ -872,34 +883,32 @@ export default class TypeScriptServiceClient extends Disposable implements IType
 					});
 				}
 				break;
-
+			}
 			case EventName.configFileDiag:
 				this._onConfigDiagnosticsReceived.fire(event as Proto.ConfigFileDiagnosticEvent);
 				break;
 
-			case EventName.telemetry:
-				{
-					const body = (event as Proto.TelemetryEvent).body;
-					this.dispatchTelemetryEvent(body);
-					break;
+			case EventName.telemetry: {
+				const body = (event as Proto.TelemetryEvent).body;
+				this.dispatchTelemetryEvent(body);
+				break;
+			}
+			case EventName.projectLanguageServiceState: {
+				const body = (event as Proto.ProjectLanguageServiceStateEvent).body!;
+				if (this.serverState.type === ServerState.Type.Running) {
+					this.serverState.updateLanguageServiceEnabled(body.languageServiceEnabled);
 				}
-			case EventName.projectLanguageServiceState:
-				{
-					const body = (event as Proto.ProjectLanguageServiceStateEvent).body!;
-					if (this.serverState.type === ServerState.Type.Running) {
-						this.serverState.updateLanguageServiceEnabled(body.languageServiceEnabled);
-					}
-					this._onProjectLanguageServiceStateChanged.fire(body);
-					break;
-				}
-			case EventName.projectsUpdatedInBackground:
+				this._onProjectLanguageServiceStateChanged.fire(body);
+				break;
+			}
+			case EventName.projectsUpdatedInBackground: {
 				this.loadingIndicator.reset();
 
 				const body = (event as Proto.ProjectsUpdatedInBackgroundEvent).body;
 				const resources = body.openFiles.map(file => this.toResource(file));
 				this.bufferSyncSupport.getErr(resources);
 				break;
-
+			}
 			case EventName.beginInstallTypes:
 				this._onDidBeginInstallTypings.fire((event as Proto.BeginInstallTypesEvent).body);
 				break;
@@ -929,7 +938,7 @@ export default class TypeScriptServiceClient extends Disposable implements IType
 	private dispatchTelemetryEvent(telemetryData: Proto.TelemetryEventBody): void {
 		const properties: { [key: string]: string } = Object.create(null);
 		switch (telemetryData.telemetryEventName) {
-			case 'typingsInstalled':
+			case 'typingsInstalled': {
 				const typingsInstalledPayload: Proto.TypingsInstalledTelemetryEventPayload = (telemetryData.payload as Proto.TypingsInstalledTelemetryEventPayload);
 				properties['installedPackages'] = typingsInstalledPayload.installedPackages;
 
@@ -940,8 +949,8 @@ export default class TypeScriptServiceClient extends Disposable implements IType
 					properties['typingsInstallerVersion'] = typingsInstalledPayload.typingsInstallerVersion;
 				}
 				break;
-
-			default:
+			}
+			default: {
 				const payload = telemetryData.payload;
 				if (payload) {
 					Object.keys(payload).forEach((key) => {
@@ -955,6 +964,7 @@ export default class TypeScriptServiceClient extends Disposable implements IType
 					});
 				}
 				break;
+			}
 		}
 		if (telemetryData.telemetryEventName === 'projectInfo') {
 			if (this.serverState.type === ServerState.Type.Running) {
@@ -1052,11 +1062,12 @@ function getDignosticsKind(event: Proto.Event) {
 }
 
 class ServerInitializingIndicator extends Disposable {
-	private _task?: { project: string | undefined, resolve: () => void, reject: () => void };
+
+	private _task?: { project: string | undefined, resolve: () => void };
 
 	public reset(): void {
 		if (this._task) {
-			this._task.reject();
+			this._task.resolve();
 			this._task = undefined;
 		}
 	}
@@ -1072,8 +1083,8 @@ class ServerInitializingIndicator extends Disposable {
 		vscode.window.withProgress({
 			location: vscode.ProgressLocation.Window,
 			title: localize('serverLoading.progress', "Initializing JS/TS language features"),
-		}, () => new Promise<void>((resolve, reject) => {
-			this._task = { project: projectName, resolve, reject };
+		}, () => new Promise<void>(resolve => {
+			this._task = { project: projectName, resolve };
 		}));
 	}
 

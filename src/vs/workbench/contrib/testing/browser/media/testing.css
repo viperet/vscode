@@ -146,6 +146,10 @@
 	margin-bottom: 0;
 }
 
+.monaco-editor .zone-widget.test-output-peek .preview-text a {
+	cursor: pointer;
+}
+
 /** -- filter  */
 .testing-filter-action-bar {
 	flex-shrink: 0;
@@ -162,6 +166,10 @@
 
 .testing-filter-action-bar .testing-filter-action-item {
 	max-width: none;
+}
+
+.testing-filter-wrapper {
+	height: 27px;
 }
 
 .testing-filter-action-item .testing-filter-wrapper {
@@ -187,10 +195,19 @@
 	cursor: pointer;
 }
 
-.monaco-editor .testing-inline-message-content {
-	cursor: pointer;
+.testing-diff-title-widget {
+	line-height: 19px;
+	font-size: 12px;
+	padding-right: 6px;
+
+	overflow: hidden;
+	display: inline-block;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 }
 
-.monaco-editor .testing-inline-message-line {
-	background: red;
+.test-message-inline-content {
+	font-family: var(--testMessageDecorationFontFamily);
+	font-size: var(--testMessageDecorationFontSize);
+	cursor: pointer;
 }

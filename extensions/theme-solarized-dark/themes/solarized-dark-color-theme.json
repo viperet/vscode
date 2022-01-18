@@ -287,6 +287,12 @@
 			}
 		},
 		{
+			"scope": "markup.strikethrough",
+			"settings": {
+				"fontStyle": "strikethrough"
+			}
+		},
+		{
 			"name": "Markup Inline",
 			"scope": "markup.inline.raw",
 			"settings": {
@@ -390,6 +396,11 @@
 		"editor.selectionHighlightBackground": "#005A6FAA",
 		"editor.wordHighlightBackground": "#004454AA",
 		"editor.wordHighlightStrongBackground": "#005A6FAA",
+
+		// Editor: Colorized Bracket Highlighting
+		"editorBracketHighlight.foreground1": "#cdcdcdff",
+		"editorBracketHighlight.foreground2": "#b58900ff",
+		"editorBracketHighlight.foreground3": "#d33682ff",
 
 		// Editor: Suggest
 		// "editorSuggestWidget.background": "",

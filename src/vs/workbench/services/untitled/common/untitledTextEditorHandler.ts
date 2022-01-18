@@ -8,9 +8,9 @@ import { Disposable } from 'vs/base/common/lifecycle';
 import { URI, UriComponents } from 'vs/base/common/uri';
 import { IEditorSerializer } from 'vs/workbench/common/editor';
 import { EditorInput } from 'vs/workbench/common/editor/editorInput';
-import { IEditorService } from 'vs/workbench/services/editor/common/editorService';
+import { ITextEditorService } from 'vs/workbench/services/textfile/common/textEditorService';
 import { isEqual, toLocalResource } from 'vs/base/common/resources';
-import { PLAINTEXT_MODE_ID } from 'vs/editor/common/modes/modesRegistry';
+import { PLAINTEXT_LANGUAGE_ID } from 'vs/editor/common/languages/modesRegistry';
 import { IInstantiationService } from 'vs/platform/instantiation/common/instantiation';
 import { IWorkbenchEnvironmentService } from 'vs/workbench/services/environment/common/environmentService';
 import { IFilesConfigurationService } from 'vs/workbench/services/filesConfiguration/common/filesConfigurationService';
@@ -22,7 +22,7 @@ import { IWorkingCopyEditorService } from 'vs/workbench/services/workingCopy/com
 
 interface ISerializedUntitledTextEditorInput {
 	resourceJSON: UriComponents;
-	modeId: string | undefined;
+	modeId: string | undefined; // should be `languageId` but is kept for backwards compatibility
 	encoding: string | undefined;
 }
 
@@ -50,21 +50,21 @@ export class UntitledTextEditorInputSerializer implements IEditorSerializer {
 			resource = toLocalResource(resource, this.environmentService.remoteAuthority, this.pathService.defaultUriScheme); // untitled with associated file path use the local schema
 		}
 
-		// Mode: only remember mode if it is either specific (not text)
-		// or if the mode was explicitly set by the user. We want to preserve
-		// this information across restarts and not set the mode unless
+		// Language: only remember language if it is either specific (not text)
+		// or if the language was explicitly set by the user. We want to preserve
+		// this information across restarts and not set the language unless
 		// this is the case.
-		let modeId: string | undefined;
-		const modeIdCandidate = untitledTextEditorInput.getMode();
-		if (modeIdCandidate !== PLAINTEXT_MODE_ID) {
-			modeId = modeIdCandidate;
-		} else if (untitledTextEditorInput.model.hasModeSetExplicitly) {
-			modeId = modeIdCandidate;
+		let languageId: string | undefined;
+		const languageIdCandidate = untitledTextEditorInput.getLanguageId();
+		if (languageIdCandidate !== PLAINTEXT_LANGUAGE_ID) {
+			languageId = languageIdCandidate;
+		} else if (untitledTextEditorInput.model.hasLanguageSetExplicitly) {
+			languageId = languageIdCandidate;
 		}
 
 		const serialized: ISerializedUntitledTextEditorInput = {
 			resourceJSON: resource.toJSON(),
-			modeId,
+			modeId: languageId,
 			encoding: untitledTextEditorInput.getEncoding()
 		};
 
@@ -75,10 +75,10 @@ export class UntitledTextEditorInputSerializer implements IEditorSerializer {
 		return instantiationService.invokeFunction(accessor => {
 			const deserialized: ISerializedUntitledTextEditorInput = JSON.parse(serializedEditorInput);
 			const resource = URI.revive(deserialized.resourceJSON);
-			const mode = deserialized.modeId;
+			const languageId = deserialized.modeId;
 			const encoding = deserialized.encoding;
 
-			return accessor.get(IEditorService).createEditorInput({ resource, mode, encoding, forceUntitled: true }) as UntitledTextEditorInput;
+			return accessor.get(ITextEditorService).createTextEditor({ resource, languageId, encoding, forceUntitled: true }) as UntitledTextEditorInput;
 		});
 	}
 }
@@ -91,7 +91,7 @@ export class UntitledTextEditorWorkingCopyEditorHandler extends Disposable imple
 		@IWorkingCopyEditorService private readonly workingCopyEditorService: IWorkingCopyEditorService,
 		@IWorkbenchEnvironmentService private readonly environmentService: IWorkbenchEnvironmentService,
 		@IPathService private readonly pathService: IPathService,
-		@IEditorService private readonly editorService: IEditorService
+		@ITextEditorService private readonly textEditorService: ITextEditorService
 	) {
 		super();
 
@@ -114,7 +114,7 @@ export class UntitledTextEditorWorkingCopyEditorHandler extends Disposable imple
 					editorInputResource = workingCopy.resource;
 				}
 
-				return this.editorService.createEditorInput({ resource: editorInputResource, forceUntitled: true });
+				return this.textEditorService.createTextEditor({ resource: editorInputResource, forceUntitled: true });
 			}
 		}));
 	}

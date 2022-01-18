@@ -4,38 +4,24 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { groupBy } from 'vs/base/common/arrays';
+import { CharCode } from 'vs/base/common/charCode';
 import { dispose } from 'vs/base/common/lifecycle';
 import { getLeadingWhitespace } from 'vs/base/common/strings';
+import { withNullAsUndefined } from 'vs/base/common/types';
 import 'vs/css!./snippetSession';
 import { IActiveCodeEditor } from 'vs/editor/browser/editorBrowser';
+import { EditorOption } from 'vs/editor/common/config/editorOptions';
 import { EditOperation } from 'vs/editor/common/core/editOperation';
 import { IPosition } from 'vs/editor/common/core/position';
 import { Range } from 'vs/editor/common/core/range';
 import { Selection } from 'vs/editor/common/core/selection';
 import { IIdentifiedSingleEditOperation, ITextModel, TrackedRangeStickiness } from 'vs/editor/common/model';
 import { ModelDecorationOptions } from 'vs/editor/common/model/textModel';
-import { IWorkspaceContextService } from 'vs/platform/workspace/common/workspace';
-import { optional } from 'vs/platform/instantiation/common/instantiation';
-import { Choice, Placeholder, SnippetParser, Text, TextmateSnippet, Marker } from './snippetParser';
-import { ClipboardBasedVariableResolver, CompositeSnippetVariableResolver, ModelBasedVariableResolver, SelectionBasedVariableResolver, TimeBasedVariableResolver, CommentBasedVariableResolver, WorkspaceBasedVariableResolver, RandomBasedVariableResolver } from './snippetVariables';
-import { registerThemingParticipant } from 'vs/platform/theme/common/themeService';
-import * as colors from 'vs/platform/theme/common/colorRegistry';
-import { withNullAsUndefined } from 'vs/base/common/types';
-import { ILabelService } from 'vs/platform/label/common/label';
-import { EditorOption } from 'vs/editor/common/config/editorOptions';
 import { OvertypingCapturer } from 'vs/editor/contrib/suggest/suggestOvertypingCapturer';
-import { CharCode } from 'vs/base/common/charCode';
-
-registerThemingParticipant((theme, collector) => {
-
-	function getColorGraceful(name: string) {
-		const color = theme.getColor(name);
-		return color ? color.toString() : 'transparent';
-	}
-
-	collector.addRule(`.monaco-editor .snippet-placeholder { background-color: ${getColorGraceful(colors.snippetTabstopHighlightBackground)}; outline-color: ${getColorGraceful(colors.snippetTabstopHighlightBorder)}; }`);
-	collector.addRule(`.monaco-editor .finish-snippet-placeholder { background-color: ${getColorGraceful(colors.snippetFinalTabstopHighlightBackground)}; outline-color: ${getColorGraceful(colors.snippetFinalTabstopHighlightBorder)}; }`);
-});
+import { ILabelService } from 'vs/platform/label/common/label';
+import { IWorkspaceContextService } from 'vs/platform/workspace/common/workspace';
+import { Choice, Marker, Placeholder, SnippetParser, Text, TextmateSnippet } from './snippetParser';
+import { ClipboardBasedVariableResolver, CommentBasedVariableResolver, CompositeSnippetVariableResolver, ModelBasedVariableResolver, RandomBasedVariableResolver, SelectionBasedVariableResolver, TimeBasedVariableResolver, WorkspaceBasedVariableResolver } from './snippetVariables';
 
 export class OneSnippet {
 
@@ -415,8 +401,8 @@ export class SnippetSession {
 		}
 		const model = editor.getModel();
 
-		const workspaceService = editor.invokeWithinContext(accessor => accessor.get(IWorkspaceContextService, optional));
-		const modelBasedVariableResolver = editor.invokeWithinContext(accessor => new ModelBasedVariableResolver(accessor.get(ILabelService, optional), model));
+		const workspaceService = editor.invokeWithinContext(accessor => accessor.get(IWorkspaceContextService));
+		const modelBasedVariableResolver = editor.invokeWithinContext(accessor => new ModelBasedVariableResolver(accessor.get(ILabelService), model));
 		const readClipboardText = () => clipboardText;
 
 		let delta = 0;

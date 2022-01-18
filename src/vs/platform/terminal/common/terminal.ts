@@ -25,6 +25,9 @@ export const enum TerminalSettingId {
 	AutomationShellLinux = 'terminal.integrated.automationShell.linux',
 	AutomationShellMacOs = 'terminal.integrated.automationShell.osx',
 	AutomationShellWindows = 'terminal.integrated.automationShell.windows',
+	AutomationProfileLinux = 'terminal.integrated.automationProfile.linux',
+	AutomationProfileMacOs = 'terminal.integrated.automationProfile.osx',
+	AutomationProfileWindows = 'terminal.integrated.automationProfile.windows',
 	ShellArgsLinux = 'terminal.integrated.shellArgs.linux',
 	ShellArgsMacOs = 'terminal.integrated.shellArgs.osx',
 	ShellArgsWindows = 'terminal.integrated.shellArgs.windows',
@@ -64,6 +67,9 @@ export const enum TerminalSettingId {
 	DetectLocale = 'terminal.integrated.detectLocale',
 	DefaultLocation = 'terminal.integrated.defaultLocation',
 	GpuAcceleration = 'terminal.integrated.gpuAcceleration',
+	TerminalTitleSeparator = 'terminal.integrated.tabs.separator',
+	TerminalTitle = 'terminal.integrated.tabs.title',
+	TerminalDescription = 'terminal.integrated.tabs.description',
 	RightClickBehavior = 'terminal.integrated.rightClickBehavior',
 	Cwd = 'terminal.integrated.cwd',
 	ConfirmOnExit = 'terminal.integrated.confirmOnExit',
@@ -81,16 +87,22 @@ export const enum TerminalSettingId {
 	SplitCwd = 'terminal.integrated.splitCwd',
 	WindowsEnableConpty = 'terminal.integrated.windowsEnableConpty',
 	WordSeparators = 'terminal.integrated.wordSeparators',
-	TitleMode = 'terminal.integrated.titleMode',
 	EnableFileLinks = 'terminal.integrated.enableFileLinks',
 	UnicodeVersion = 'terminal.integrated.unicodeVersion',
 	ExperimentalLinkProvider = 'terminal.integrated.experimentalLinkProvider',
 	LocalEchoLatencyThreshold = 'terminal.integrated.localEchoLatencyThreshold',
+	LocalEchoEnabled = 'terminal.integrated.localEchoEnabled',
 	LocalEchoExcludePrograms = 'terminal.integrated.localEchoExcludePrograms',
 	LocalEchoStyle = 'terminal.integrated.localEchoStyle',
 	EnablePersistentSessions = 'terminal.integrated.enablePersistentSessions',
+	PersistentSessionReviveProcess = 'terminal.integrated.persistentSessionReviveProcess',
+	CustomGlyphs = 'terminal.integrated.customGlyphs',
+	PersistentSessionScrollback = 'terminal.integrated.persistentSessionScrollback',
 	InheritEnv = 'terminal.integrated.inheritEnv',
 	ShowLinkHover = 'terminal.integrated.showLinkHover',
+	IgnoreProcessNames = 'terminal.integrated.ignoreProcessNames',
+	AutoReplies = 'terminal.integrated.autoReplies',
+	EnableShellIntegration = 'terminal.integrated.enableShellIntegration'
 }
 
 export enum WindowsShellType {
@@ -129,6 +141,7 @@ export interface IPtyHostAttachTarget {
 	workspaceName: string;
 	isOrphan: boolean;
 	icon: TerminalIcon | undefined;
+	fixedDimensions: IFixedTerminalDimensions | undefined;
 }
 
 export enum TitleEventSource {
@@ -137,7 +150,9 @@ export enum TitleEventSource {
 	/** From the process name property*/
 	Process,
 	/** From the VT sequence */
-	Sequence
+	Sequence,
+	/** Config changed */
+	Config
 }
 
 export type ITerminalsLayoutInfo = IRawTerminalsLayoutInfo<IPtyHostAttachTarget | null>;
@@ -168,26 +183,67 @@ export enum TerminalIpcChannels {
 }
 
 export const IPtyService = createDecorator<IPtyService>('ptyService');
-export interface IPtyService {
-	readonly _serviceBrand: undefined;
 
+export const enum ProcessPropertyType {
+	Cwd = 'cwd',
+	InitialCwd = 'initialCwd',
+	FixedDimensions = 'fixedDimensions',
+	Title = 'title',
+	ShellType = 'shellType',
+	HasChildProcesses = 'hasChildProcesses',
+	ResolvedShellLaunchConfig = 'resolvedShellLaunchConfig',
+	OverrideDimensions = 'overrideDimensions'
+}
+
+export interface IProcessProperty<T extends ProcessPropertyType> {
+	type: T,
+	value: IProcessPropertyMap[T]
+}
+
+export interface IProcessPropertyMap {
+	[ProcessPropertyType.Cwd]: string,
+	[ProcessPropertyType.InitialCwd]: string,
+	[ProcessPropertyType.FixedDimensions]: IFixedTerminalDimensions,
+	[ProcessPropertyType.Title]: string
+	[ProcessPropertyType.ShellType]: TerminalShellType | undefined,
+	[ProcessPropertyType.HasChildProcesses]: boolean,
+	[ProcessPropertyType.ResolvedShellLaunchConfig]: IShellLaunchConfig,
+	[ProcessPropertyType.OverrideDimensions]: ITerminalDimensionsOverride | undefined
+}
+
+export interface IFixedTerminalDimensions {
+	/**
+	 * The fixed columns of the terminal.
+	 */
+	cols?: number;
+
+	/**
+	 * The fixed rows of the terminal.
+	 */
+	rows?: number;
+}
+
+export interface IPtyHostController {
 	readonly onPtyHostExit?: Event<number>;
 	readonly onPtyHostStart?: Event<void>;
 	readonly onPtyHostUnresponsive?: Event<void>;
 	readonly onPtyHostResponsive?: Event<void>;
 	readonly onPtyHostRequestResolveVariables?: Event<IRequestResolveVariablesEvent>;
 
+	restartPtyHost?(): Promise<void>;
+	acceptPtyHostResolvedVariables?(requestId: number, resolved: string[]): Promise<void>;
+}
+
+export interface IPtyService extends IPtyHostController {
+	readonly _serviceBrand: undefined;
+
 	readonly onProcessData: Event<{ id: number, event: IProcessDataEvent | string }>;
-	readonly onProcessExit: Event<{ id: number, event: number | undefined }>;
-	readonly onProcessReady: Event<{ id: number, event: { pid: number, cwd: string } }>;
-	readonly onProcessTitleChanged: Event<{ id: number, event: string }>;
-	readonly onProcessShellTypeChanged: Event<{ id: number, event: TerminalShellType }>;
-	readonly onProcessOverrideDimensions: Event<{ id: number, event: ITerminalDimensionsOverride | undefined }>;
-	readonly onProcessResolvedShellLaunchConfig: Event<{ id: number, event: IShellLaunchConfig }>;
+	readonly onProcessReady: Event<{ id: number, event: IProcessReadyEvent }>;
 	readonly onProcessReplay: Event<{ id: number, event: IPtyHostProcessReplayEvent }>;
 	readonly onProcessOrphanQuestion: Event<{ id: number }>;
 	readonly onDidRequestDetach: Event<{ requestId: number, workspaceId: string, instanceId: number }>;
-	readonly onProcessDidChangeHasChildProcesses: Event<{ id: number, event: boolean }>;
+	readonly onDidChangeProperty: Event<{ id: number, property: IProcessProperty<any> }>
+	readonly onProcessExit: Event<{ id: number, event: number | undefined }>;
 
 	restartPtyHost?(): Promise<void>;
 	shutdownAll?(): Promise<void>;
@@ -198,6 +254,7 @@ export interface IPtyService {
 		cwd: string,
 		cols: number,
 		rows: number,
+		unicodeVersion: '6' | '11',
 		env: IProcessEnvironment,
 		executableEnv: IProcessEnvironment,
 		windowsEnableConpty: boolean,
@@ -221,11 +278,15 @@ export interface IPtyService {
 	getCwd(id: number): Promise<string>;
 	getLatency(id: number): Promise<number>;
 	acknowledgeDataEvent(id: number, charCount: number): Promise<void>;
+	setUnicodeVersion(id: number, version: '6' | '11'): Promise<void>;
 	processBinary(id: number, data: string): Promise<void>;
 	/** Confirm the process is _not_ an orphan. */
 	orphanQuestionReply(id: number): Promise<void>;
 	updateTitle(id: number, title: string, titleSource: TitleEventSource): Promise<void>;
 	updateIcon(id: number, icon: TerminalIcon, color?: string): Promise<void>;
+	installAutoReply(match: string, reply: string): Promise<void>;
+	uninstallAllAutoReplies(): Promise<void>;
+	uninstallAutoReply(match: string): Promise<void>;
 	getDefaultSystemShell(osOverride?: OperatingSystem): Promise<string>;
 	getProfiles?(workspaceId: string, profiles: unknown, defaultProfile: unknown, includeDetectedProfiles?: boolean): Promise<ITerminalProfile[]>;
 	getEnvironment(): Promise<IProcessEnvironment>;
@@ -235,6 +296,45 @@ export interface IPtyService {
 	reduceConnectionGraceTime(): Promise<void>;
 	requestDetachInstance(workspaceId: string, instanceId: number): Promise<IProcessDetails | undefined>;
 	acceptDetachInstanceReply(requestId: number, persistentProcessId?: number): Promise<void>;
+	/**
+	 * Serializes and returns terminal state.
+	 * @param ids The persistent terminal IDs to serialize.
+	 */
+	serializeTerminalState(ids: number[]): Promise<string>;
+	/**
+	 * Revives a workspaces terminal processes, these can then be reconnected to using the normal
+	 * flow for restoring terminals after reloading.
+	 */
+	reviveTerminalProcesses(state: ISerializedTerminalState[], dateTimeFormatLocate: string): Promise<void>;
+	refreshProperty<T extends ProcessPropertyType>(id: number, property: T): Promise<IProcessPropertyMap[T]>;
+	updateProperty<T extends ProcessPropertyType>(id: number, property: T, value: IProcessPropertyMap[T]): Promise<void>;
+
+	refreshIgnoreProcessNames?(names: string[]): Promise<void>;
+}
+
+/**
+ * Serialized terminal state matching the interface that can be used across versions, the version
+ * should be verified before using the state payload.
+ */
+export interface ICrossVersionSerializedTerminalState {
+	version: number;
+	state: unknown;
+}
+
+export interface ISerializedTerminalState {
+	id: number;
+	shellLaunchConfig: IShellLaunchConfig;
+	processDetails: IProcessDetails;
+	processLaunchOptions: IPersistentTerminalProcessLaunchOptions;
+	unicodeVersion: '6' | '11';
+	replayEvent: IPtyHostProcessReplayEvent;
+	timestamp: number;
+}
+
+export interface IPersistentTerminalProcessLaunchOptions {
+	env: IProcessEnvironment;
+	executableEnv: IProcessEnvironment;
+	windowsEnableConpty: boolean;
 }
 
 export interface IRequestResolveVariablesEvent {
@@ -270,6 +370,7 @@ export enum HeartbeatConstants {
 export interface IHeartbeatService {
 	readonly onBeat: Event<void>;
 }
+
 
 export interface IShellLaunchConfig {
 	/**
@@ -336,7 +437,7 @@ export interface IShellLaunchConfig {
 	/**
 	 * This is a terminal that attaches to an already running terminal.
 	 */
-	attachPersistentProcess?: { id: number; pid: number; title: string; titleSource: TitleEventSource; cwd: string; icon?: TerminalIcon; color?: string, hasChildProcesses?: boolean };
+	attachPersistentProcess?: { id: number; pid: number; title: string; titleSource: TitleEventSource; cwd: string; icon?: TerminalIcon; color?: string, hasChildProcesses?: boolean, fixedDimensions?: IFixedTerminalDimensions };
 
 	/**
 	 * Whether the terminal process environment should be exactly as provided in
@@ -384,16 +485,38 @@ export interface IShellLaunchConfig {
 	 * The color ID to use for this terminal. If not specified it will use the default fallback
 	 */
 	color?: string;
+
+	/**
+	 * When a parent terminal is provided via API, the group needs
+	 * to find the index in order to place the child
+	 * directly to the right of its parent.
+	 */
+	parentTerminalId?: number;
+
+	/**
+	 * The dimensions for the instance as set by the user
+	 * or via Size to Content Width
+	 */
+	fixedDimensions?: IFixedTerminalDimensions;
+
+	/**
+	 * Opt-out of the default terminal persistence on restart and reload
+	 */
+	disablePersistence?: boolean;
 }
 
 export interface ICreateContributedTerminalProfileOptions {
-	target?: TerminalLocation;
 	icon?: URI | string | { light: URI, dark: URI };
 	color?: string;
-	isSplitTerminal?: boolean;
+	location?: TerminalLocation | { viewColumn: number, preserveState?: boolean } | { splitActiveTerminal: boolean };
 }
 
-export const enum TerminalLocation {
+export enum TerminalLocation {
+	Panel = 1,
+	Editor = 2
+}
+
+export const enum TerminalLocationString {
 	TerminalView = 'view',
 	Editor = 'editor'
 }
@@ -426,6 +549,32 @@ export interface IProcessReadyEvent {
 }
 
 /**
+ * Primarily driven by the shell integration feature, a terminal capability is the mechanism for
+ * progressively enhancing various features that may not be supported in all terminals/shells.
+ */
+export const enum TerminalCapability {
+	/**
+	 * The terminal can reliably detect the current working directory as soon as the change happens
+	 * within the buffer.
+	 */
+	CwdDetection,
+	/**
+	 * The terminal can reliably detect the current working directory when requested.
+	 */
+	NaiveCwdDetection,
+	/**
+	 * The terminal can reliably identify prompts, commands and command outputs within the buffer.
+	 */
+	CommandDetection,
+	/**
+	 * The terminal can often identify prompts, commands and command outputs within the buffer. It
+	 * may not be so good at remembering the position of commands that ran in the past. This state
+	 * may be enabled when something goes wrong or when using conpty for example.
+	 */
+	PartialCommandDetection
+}
+
+/**
  * An interface representing a raw terminal child process, this contains a subset of the
  * child_process.ChildProcess node.js interface.
  */
@@ -443,13 +592,9 @@ export interface ITerminalChildProcess {
 	shouldPersist: boolean;
 
 	onProcessData: Event<IProcessDataEvent | string>;
-	onProcessExit: Event<number | undefined>;
 	onProcessReady: Event<IProcessReadyEvent>;
-	onProcessTitleChanged: Event<string>;
-	onProcessShellTypeChanged: Event<TerminalShellType>;
-	onProcessOverrideDimensions?: Event<ITerminalDimensionsOverride | undefined>;
-	onProcessResolvedShellLaunchConfig?: Event<IShellLaunchConfig>;
-	onDidChangeHasChildProcesses?: Event<boolean>;
+	onDidChangeProperty: Event<IProcessProperty<any>>;
+	onProcessExit: Event<number | undefined>;
 
 	/**
 	 * Starts the process.
@@ -483,14 +628,23 @@ export interface ITerminalChildProcess {
 	 */
 	acknowledgeDataEvent(charCount: number): void;
 
+	/**
+	 * Sets the unicode version for the process, this drives the size of some characters in the
+	 * xterm-headless instance.
+	 */
+	setUnicodeVersion(version: '6' | '11'): Promise<void>;
+
 	getInitialCwd(): Promise<string>;
 	getCwd(): Promise<string>;
 	getLatency(): Promise<number>;
+	refreshProperty<T extends ProcessPropertyType>(property: T): Promise<IProcessPropertyMap[T]>;
+	updateProperty<T extends ProcessPropertyType>(property: T, value: IProcessPropertyMap[T]): Promise<void>;
 }
 
 export interface IReconnectConstants {
-	GraceTime: number,
-	ShortGraceTime: number
+	graceTime: number;
+	shortGraceTime: number;
+	scrollback: number;
 }
 
 export const enum LocalReconnectConstants {
@@ -553,6 +707,11 @@ export interface ITerminalProfile {
 	path: string;
 	isDefault: boolean;
 	isAutoDetected?: boolean;
+	/**
+	 * Whether the profile path was found on the `$PATH` environment variable, if so it will be
+	 * cleaner to display this profile in the UI using only `basename(path)`.
+	 */
+	isFromPath?: boolean;
 	args?: string | string[] | undefined;
 	env?: ITerminalEnvironment;
 	overrideName?: boolean;

@@ -55,7 +55,6 @@ export class HoverAction extends Disposable {
 
 		this.actionContainer = dom.append(parent, $('div.action-container'));
 		this.action = dom.append(this.actionContainer, $('a.action'));
-		this.action.setAttribute('href', '#');
 		this.action.setAttribute('role', 'button');
 		if (actionOptions.iconClass) {
 			dom.append(this.action, $(`span.icon.${actionOptions.iconClass}`));
@@ -63,7 +62,7 @@ export class HoverAction extends Disposable {
 		const label = dom.append(this.action, $('span'));
 		label.textContent = keybindingLabel ? `${actionOptions.label} (${keybindingLabel})` : actionOptions.label;
 
-		this._register(dom.addDisposableListener(this.actionContainer, dom.EventType.CLICK, e => {
+		this._register(dom.addDisposableListener(this.actionContainer, dom.EventType.MOUSE_DOWN, e => {
 			e.stopPropagation();
 			e.preventDefault();
 			actionOptions.run(this.actionContainer);

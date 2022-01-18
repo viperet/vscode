@@ -26,7 +26,7 @@ import { RunOnceScheduler } from 'vs/base/common/async';
 import { IInstantiationService } from 'vs/platform/instantiation/common/instantiation';
 import { createActionViewItem, createAndFillInActionBarActions } from 'vs/platform/actions/browser/menuEntryActionViewItem';
 import { ICommandAction, IMenu, IMenuService, MenuId, MenuRegistry } from 'vs/platform/actions/common/actions';
-import { IContextKeyService, ContextKeyExpression, ContextKeyExpr, ContextKeyEqualsExpr } from 'vs/platform/contextkey/common/contextkey';
+import { IContextKeyService, ContextKeyExpression, ContextKeyExpr } from 'vs/platform/contextkey/common/contextkey';
 import { IDisposable, dispose } from 'vs/base/common/lifecycle';
 import * as icons from 'vs/workbench/contrib/debug/browser/debugIcons';
 import { debugToolBarBackground, debugToolBarBorder } from 'vs/workbench/contrib/debug/browser/debugColors';
@@ -121,7 +121,7 @@ export class DebugToolBar extends Themable implements IWorkbenchContribution {
 		this._register(this.debugToolBarMenu.onDidChange(() => this.updateScheduler.schedule()));
 		this._register(this.actionBar.actionRunner.onDidRun((e: IRunEvent) => {
 			// check for error
-			if (e.error && !errors.isPromiseCanceledError(e.error)) {
+			if (e.error && !errors.isCancellationError(e.error)) {
 				this.notificationService.error(e.error);
 			}
 
@@ -161,7 +161,7 @@ export class DebugToolBar extends Themable implements IWorkbenchContribution {
 		}));
 
 		this._register(this.layoutService.onDidChangePartVisibility(() => this.setYCoordinate()));
-		this._register(browser.onDidChangeZoomLevel(() => this.setYCoordinate()));
+		this._register(browser.PixelRatio.onDidChange(() => this.setYCoordinate()));
 	}
 
 	private storePosition(): void {
@@ -257,8 +257,8 @@ export class DebugToolBar extends Themable implements IWorkbenchContribution {
 
 // Debug toolbar
 
-let debugViewTitleItems: IDisposable[] = [];
-const registerDebugToolBarItem = (id: string, title: string, order: number, icon?: { light?: URI, dark?: URI } | ThemeIcon, when?: ContextKeyExpression, precondition?: ContextKeyExpression, alt?: ICommandAction) => {
+const debugViewTitleItems: IDisposable[] = [];
+const registerDebugToolBarItem = (id: string, title: string, order: number, icon?: { light?: URI, dark?: URI; } | ThemeIcon, when?: ContextKeyExpression, precondition?: ContextKeyExpression, alt?: ICommandAction) => {
 	MenuRegistry.appendMenuItem(MenuId.DebugToolBar, {
 		group: 'navigation',
 		when,
@@ -275,7 +275,7 @@ const registerDebugToolBarItem = (id: string, title: string, order: number, icon
 	// Register actions in debug viewlet when toolbar is docked
 	debugViewTitleItems.push(MenuRegistry.appendMenuItem(MenuId.ViewContainerTitle, {
 		group: 'navigation',
-		when: ContextKeyExpr.and(when, ContextKeyEqualsExpr.create('viewContainer', VIEWLET_ID), CONTEXT_DEBUG_STATE.notEqualsTo('inactive'), ContextKeyExpr.equals('config.debug.toolBarLocation', 'docked')),
+		when: ContextKeyExpr.and(when, ContextKeyExpr.equals('viewContainer', VIEWLET_ID), CONTEXT_DEBUG_STATE.notEqualsTo('inactive'), ContextKeyExpr.equals('config.debug.toolBarLocation', 'docked')),
 		order,
 		command: {
 			id,
@@ -294,7 +294,7 @@ MenuRegistry.onDidChangeMenu(e => {
 		for (const i of items) {
 			debugViewTitleItems.push(MenuRegistry.appendMenuItem(MenuId.ViewContainerTitle, {
 				...i,
-				when: ContextKeyExpr.and(i.when, ContextKeyEqualsExpr.create('viewContainer', VIEWLET_ID), CONTEXT_DEBUG_STATE.notEqualsTo('inactive'), ContextKeyExpr.equals('config.debug.toolBarLocation', 'docked'))
+				when: ContextKeyExpr.and(i.when, ContextKeyExpr.equals('viewContainer', VIEWLET_ID), CONTEXT_DEBUG_STATE.notEqualsTo('inactive'), ContextKeyExpr.equals('config.debug.toolBarLocation', 'docked'))
 			}));
 		}
 	}

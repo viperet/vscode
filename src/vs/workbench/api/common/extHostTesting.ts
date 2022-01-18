@@ -3,25 +3,25 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { mapFind } from 'vs/base/common/arrays';
 import { VSBuffer } from 'vs/base/common/buffer';
 import { CancellationToken, CancellationTokenSource } from 'vs/base/common/cancellation';
 import { Emitter, Event } from 'vs/base/common/event';
 import { once } from 'vs/base/common/functional';
 import { hash } from 'vs/base/common/hash';
-import { Iterable } from 'vs/base/common/iterator';
 import { Disposable, DisposableStore, toDisposable } from 'vs/base/common/lifecycle';
 import { MarshalledId } from 'vs/base/common/marshalling';
 import { deepFreeze } from 'vs/base/common/objects';
 import { isDefined } from 'vs/base/common/types';
 import { generateUuid } from 'vs/base/common/uuid';
-import { ExtHostTestingShape, MainContext, MainThreadTestingShape } from 'vs/workbench/api/common/extHost.protocol';
+import { ExtHostTestingShape, ILocationDto, MainContext, MainThreadTestingShape } from 'vs/workbench/api/common/extHost.protocol';
 import { ExtHostCommands } from 'vs/workbench/api/common/extHostCommands';
 import { IExtHostRpcService } from 'vs/workbench/api/common/extHostRpcService';
 import { InvalidTestItemError, TestItemImpl, TestItemRootImpl } from 'vs/workbench/api/common/extHostTestingPrivateApi';
 import * as Convert from 'vs/workbench/api/common/extHostTypeConverters';
 import { TestRunProfileKind, TestRunRequest } from 'vs/workbench/api/common/extHostTypes';
 import { SingleUseTestCollection } from 'vs/workbench/contrib/testing/common/ownedTestCollection';
-import { AbstractIncrementalTestCollection, CoverageDetails, IFileCoverage, IncrementalChangeCollector, IncrementalTestCollectionItem, InternalTestItem, ISerializedTestResults, ITestItem, ITestTagDisplayInfo, RunTestForControllerRequest, TestResultState, TestRunProfileBitset, TestsDiff } from 'vs/workbench/contrib/testing/common/testCollection';
+import { AbstractIncrementalTestCollection, CoverageDetails, IFileCoverage, IncrementalChangeCollector, IncrementalTestCollectionItem, InternalTestItem, ISerializedTestResults, ITestItem, RunTestForControllerRequest, TestResultState, TestRunProfileBitset, TestsDiff } from 'vs/workbench/contrib/testing/common/testCollection';
 import { TestId, TestIdPathParts, TestPosition } from 'vs/workbench/contrib/testing/common/testId';
 import type * as vscode from 'vscode';
 
@@ -55,7 +55,7 @@ export class ExtHostTesting implements ExtHostTestingShape {
 	/**
 	 * Implements vscode.test.registerTestProvider
 	 */
-	public createTestController(controllerId: string, label: string): vscode.TestController {
+	public createTestController(controllerId: string, label: string, refreshHandler?: (token: CancellationToken) => Thenable<void> | void): vscode.TestController {
 		if (this.controllers.has(controllerId)) {
 			throw new Error(`Attempt to insert a duplicate controller with ID "${controllerId}"`);
 		}
@@ -75,7 +75,14 @@ export class ExtHostTesting implements ExtHostTestingShape {
 			set label(value: string) {
 				label = value;
 				collection.root.label = value;
-				proxy.$updateControllerLabel(controllerId, label);
+				proxy.$updateController(controllerId, { label });
+			},
+			get refreshHandler() {
+				return refreshHandler;
+			},
+			set refreshHandler(value: ((token: CancellationToken) => Thenable<void> | void) | undefined) {
+				refreshHandler = value;
+				proxy.$updateController(controllerId, { canRefresh: !!value });
 			},
 			get id() {
 				return controllerId;
@@ -109,10 +116,7 @@ export class ExtHostTesting implements ExtHostTestingShape {
 			},
 		};
 
-		// back compat:
-		(controller as any).createRunConfiguration = controller.createRunProfile;
-
-		proxy.$registerTestController(controllerId, label);
+		proxy.$registerTestController(controllerId, label, !!refreshHandler);
 		disposable.add(toDisposable(() => proxy.$unregisterTestController(controllerId)));
 
 		const info: ControllerInfo = { controller, collection, profiles: profiles };
@@ -161,14 +165,16 @@ export class ExtHostTesting implements ExtHostTestingShape {
 	 * @inheritdoc
 	 */
 	$provideFileCoverage(runId: string, taskId: string, token: CancellationToken): Promise<IFileCoverage[]> {
-		return Iterable.find(this.runTracker.trackers, t => t.id === runId)?.getCoverage(taskId)?.provideFileCoverage(token) ?? Promise.resolve([]);
+		const coverage = mapFind(this.runTracker.trackers, t => t.id === runId ? t.getCoverage(taskId) : undefined);
+		return coverage?.provideFileCoverage(token) ?? Promise.resolve([]);
 	}
 
 	/**
 	 * @inheritdoc
 	 */
 	$resolveFileCoverage(runId: string, taskId: string, fileIndex: number, token: CancellationToken): Promise<CoverageDetails[]> {
-		return Iterable.find(this.runTracker.trackers, t => t.id === runId)?.getCoverage(taskId)?.resolveFileCoverage(fileIndex, token) ?? Promise.resolve([]);
+		const coverage = mapFind(this.runTracker.trackers, t => t.id === runId ? t.getCoverage(taskId) : undefined);
+		return coverage?.resolveFileCoverage(fileIndex, token) ?? Promise.resolve([]);
 	}
 
 	/** @inheritdoc */
@@ -177,26 +183,8 @@ export class ExtHostTesting implements ExtHostTestingShape {
 	}
 
 	/** @inheritdoc */
-	$getTestTags(controllerId: string) {
-		const record = this.controllers.get(controllerId);
-		if (!record) {
-			return Promise.resolve([]);
-		}
-
-		const tags = new Map<string, ITestTagDisplayInfo>();
-		for (const profile of record.profiles.values()) {
-			if (profile.tag) {
-				const display = Convert.TestTag.display(controllerId, profile.tag);
-				tags.set(display.id, display);
-			}
-		}
-
-		for (const tag of record.collection.tags()) {
-			const display = Convert.TestTag.display(controllerId, tag);
-			tags.set(display.id, display);
-		}
-
-		return Promise.resolve([...tags.values()]);
+	async $refreshTests(controllerId: string, token: CancellationToken) {
+		await this.controllers.get(controllerId)?.controller.refreshHandler?.(token);
 	}
 
 	/**
@@ -286,7 +274,7 @@ export class ExtHostTesting implements ExtHostTestingShape {
 				await Event.toPromise(tracker.onEnd);
 			}
 
-			this.runTracker.cancelRunById(req.runId);
+			tracker.dispose();
 		}
 	}
 
@@ -363,6 +351,21 @@ class TestRunTracker extends Disposable {
 				fn(test, ...args);
 			};
 
+		const appendMessages = (test: vscode.TestItem, messages: vscode.TestMessage | readonly vscode.TestMessage[]) => {
+			const converted = messages instanceof Array
+				? messages.map(Convert.TestMessage.from)
+				: [Convert.TestMessage.from(messages)];
+
+			if (test.uri && test.range) {
+				const defaultLocation: ILocationDto = { range: Convert.Range.from(test.range), uri: test.uri };
+				for (const message of converted) {
+					message.location = message.location || defaultLocation;
+				}
+			}
+
+			this.proxy.$appendTestMessagesInRun(runId, taskId, TestId.fromExtHostTestItem(test, ctrlId).toString(), converted);
+		};
+
 		let ended = false;
 		const run: vscode.TestRun = {
 			isPersisted: this.dto.isPersisted,
@@ -385,23 +388,37 @@ class TestRunTracker extends Disposable {
 				this.proxy.$updateTestStateInRun(runId, taskId, TestId.fromExtHostTestItem(test, ctrlId).toString(), TestResultState.Running);
 			}),
 			errored: guardTestMutation((test, messages, duration) => {
-				this.proxy.$appendTestMessagesInRun(runId, taskId, TestId.fromExtHostTestItem(test, ctrlId).toString(),
-					messages instanceof Array ? messages.map(Convert.TestMessage.from) : [Convert.TestMessage.from(messages)]);
+				appendMessages(test, messages);
 				this.proxy.$updateTestStateInRun(runId, taskId, TestId.fromExtHostTestItem(test, ctrlId).toString(), TestResultState.Errored, duration);
 			}),
 			failed: guardTestMutation((test, messages, duration) => {
-				this.proxy.$appendTestMessagesInRun(runId, taskId, TestId.fromExtHostTestItem(test, ctrlId).toString(),
-					messages instanceof Array ? messages.map(Convert.TestMessage.from) : [Convert.TestMessage.from(messages)]);
+				appendMessages(test, messages);
 				this.proxy.$updateTestStateInRun(runId, taskId, TestId.fromExtHostTestItem(test, ctrlId).toString(), TestResultState.Failed, duration);
 			}),
 			passed: guardTestMutation((test, duration) => {
 				this.proxy.$updateTestStateInRun(runId, taskId, TestId.fromExtHostTestItem(test, this.dto.controllerId).toString(), TestResultState.Passed, duration);
 			}),
 			//#endregion
-			appendOutput: output => {
-				if (!ended) {
-					this.proxy.$appendOutputToRun(runId, taskId, VSBuffer.fromString(output));
+			appendOutput: (output, location?: vscode.Location, test?: vscode.TestItem) => {
+				if (ended) {
+					return;
 				}
+
+				if (test) {
+					if (this.dto.isIncluded(test)) {
+						this.ensureTestIsKnown(test);
+					} else {
+						test = undefined;
+					}
+				}
+
+				this.proxy.$appendOutputToRun(
+					runId,
+					taskId,
+					VSBuffer.fromString(output),
+					location && Convert.location.from(location),
+					test && TestId.fromExtHostTestItem(test, ctrlId).toString(),
+				);
 			},
 			end: () => {
 				if (ended) {
@@ -438,30 +455,26 @@ class TestRunTracker extends Disposable {
 			throw new InvalidTestItemError(test.id);
 		}
 
-		if (this.sharedTestIds.has(test.id)) {
+		if (this.sharedTestIds.has(TestId.fromExtHostTestItem(test, this.dto.controllerId).toString())) {
 			return;
 		}
 
 		const chain: ITestItem[] = [];
-		while (true) {
-			chain.unshift(Convert.TestItem.from(test as TestItemImpl));
-
-			if (this.sharedTestIds.has(test.id)) {
-				break;
-			}
-
-			this.sharedTestIds.add(test.id);
-			if (!test.parent) {
-				break;
-			}
-
-			test = test.parent;
-		}
-
 		const root = this.dto.colllection.root;
-		if (!this.sharedTestIds.has(root.id)) {
-			this.sharedTestIds.add(root.id);
-			chain.unshift(Convert.TestItem.from(root));
+		while (true) {
+			const converted = Convert.TestItem.from(test as TestItemImpl);
+			chain.unshift(converted);
+
+			if (this.sharedTestIds.has(converted.extId)) {
+				break;
+			}
+
+			this.sharedTestIds.add(converted.extId);
+			if (test === root) {
+				break;
+			}
+
+			test = test.parent || root;
 		}
 
 		this.proxy.$addTestsToRun(this.dto.controllerId, this.dto.id, chain);

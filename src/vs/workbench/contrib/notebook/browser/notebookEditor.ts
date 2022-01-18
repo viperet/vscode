@@ -18,10 +18,11 @@ import { IStorageService } from 'vs/platform/storage/common/storage';
 import { ITelemetryService } from 'vs/platform/telemetry/common/telemetry';
 import { IThemeService } from 'vs/platform/theme/common/themeService';
 import { EditorPane } from 'vs/workbench/browser/parts/editor/editorPane';
-import { EditorInputCapabilities, IEditorInput, IEditorMemento, IEditorOpenContext } from 'vs/workbench/common/editor';
+import { EditorInputCapabilities, IEditorMemento, IEditorOpenContext } from 'vs/workbench/common/editor';
+import { EditorInput } from 'vs/workbench/common/editor/editorInput';
 import { NotebookEditorInput } from 'vs/workbench/contrib/notebook/common/notebookEditorInput';
 import { NotebookEditorWidget } from 'vs/workbench/contrib/notebook/browser/notebookEditorWidget';
-import { INotebookEditorViewState, NotebookViewModel } from 'vs/workbench/contrib/notebook/browser/viewModel/notebookViewModel';
+import { INotebookEditorViewState } from 'vs/workbench/contrib/notebook/browser/viewModel/notebookViewModel';
 import { IEditorDropService } from 'vs/workbench/services/editor/browser/editorDropService';
 import { IEditorGroup, IEditorGroupsService, GroupsOrder } from 'vs/workbench/services/editor/common/editorGroupsService';
 import { IEditorService } from 'vs/workbench/services/editor/common/editorService';
@@ -31,9 +32,10 @@ import { clearMarks, getAndClearMarks, mark } from 'vs/workbench/contrib/noteboo
 import { IFileService } from 'vs/platform/files/common/files';
 import { IActionViewItem } from 'vs/base/browser/ui/actionbar/actionbar';
 import { IAction } from 'vs/base/common/actions';
-import { SELECT_KERNEL_ID } from 'vs/workbench/contrib/notebook/browser/contrib/coreActions';
-import { NotebooKernelActionViewItem } from 'vs/workbench/contrib/notebook/browser/notebookKernelActionViewItem';
-import { ITextResourceConfigurationService } from 'vs/editor/common/services/textResourceConfigurationService';
+import { SELECT_KERNEL_ID } from 'vs/workbench/contrib/notebook/browser/controller/coreActions';
+import { NotebooKernelActionViewItem } from 'vs/workbench/contrib/notebook/browser/viewParts/notebookKernelActionViewItem';
+import { ITextResourceConfigurationService } from 'vs/editor/common/services/textResourceConfiguration';
+import { NotebookTextModel } from 'vs/workbench/contrib/notebook/common/model/notebookTextModel';
 
 const NOTEBOOK_EDITOR_VIEW_STATE_PREFERENCE_KEY = 'NotebookEditorViewState';
 
@@ -97,11 +99,11 @@ export class NotebookEditor extends EditorPane {
 		}
 	}
 
-	get viewModel(): NotebookViewModel | undefined {
-		return this._widget.value?.viewModel;
+	get textModel(): NotebookTextModel | undefined {
+		return this._widget.value?.textModel;
 	}
 
-	override get minimumWidth(): number { return 375; }
+	override get minimumWidth(): number { return 220; }
 	override get maximumWidth(): number { return Number.POSITIVE_INFINITY; }
 
 	// these setters need to exist because this extends from EditorPane
@@ -115,10 +117,6 @@ export class NotebookEditor extends EditorPane {
 
 	protected createEditor(parent: HTMLElement): void {
 		this._rootElement = DOM.append(parent, DOM.$('.notebook-editor'));
-
-		// this._widget.createEditor();
-		this._register(this.onDidFocus(() => this._widget.value?.updateEditorFocus()));
-		this._register(this.onDidBlur(() => this._widget.value?.updateEditorFocus()));
 	}
 
 	getDomNode() {
@@ -142,7 +140,7 @@ export class NotebookEditor extends EditorPane {
 		if (group) {
 			this._groupListener.clear();
 			this._groupListener.add(group.onWillCloseEditor(e => this._saveEditorViewState(e.editor)));
-			this._groupListener.add(group.onDidGroupChange(() => {
+			this._groupListener.add(group.onDidModelChange(() => {
 				if (this._editorGroupService.activeGroup !== group) {
 					this._widget?.value?.updateEditorFocus();
 				}
@@ -177,8 +175,6 @@ export class NotebookEditor extends EditorPane {
 
 		this.inputListener.value = input.onDidChangeCapabilities(() => this.onDidChangeInputCapabilities(input));
 
-		this._saveEditorViewState(this.input);
-
 		this._widgetDisposableStore.clear();
 
 		// there currently is a widget which we still own so
@@ -212,7 +208,7 @@ export class NotebookEditor extends EditorPane {
 				[{
 					label: localize('fail.reOpen', "Reopen file with VS Code standard text editor"),
 					run: async () => {
-						await this._editorService.openEditor({ resource: input.resource, forceFile: true, options: { ...options, override: EditorResolution.DISABLED } });
+						await this._editorService.openEditor({ resource: input.resource, options: { ...options, override: EditorResolution.DISABLED } });
 					}
 				}]
 			);
@@ -221,14 +217,14 @@ export class NotebookEditor extends EditorPane {
 
 
 
-		const viewState = this._loadNotebookEditorViewState(input);
+		const viewState = options?.viewState ?? this._loadNotebookEditorViewState(input);
 
 		this._widget.value?.setParentContextKeyService(this._contextKeyService);
 		await this._widget.value!.setModel(model.notebook, viewState);
 		const isReadOnly = input.hasCapability(EditorInputCapabilities.Readonly);
 		await this._widget.value!.setOptions({ ...options, isReadOnly });
-		this._widgetDisposableStore.add(this._widget.value!.onDidFocus(() => this._onDidFocusWidget.fire()));
-		this._widgetDisposableStore.add(this._widget.value!.onDidBlur(() => this._onDidBlurWidget.fire()));
+		this._widgetDisposableStore.add(this._widget.value!.onDidFocusWidget(() => this._onDidFocusWidget.fire()));
+		this._widgetDisposableStore.add(this._widget.value!.onDidBlurWidget(() => this._onDidBlurWidget.fire()));
 
 		this._widgetDisposableStore.add(this._editorDropService.createEditorDropTarget(this._widget.value!.getDomNode(), {
 			containsGroup: (group) => this.group?.id === group.id
@@ -285,7 +281,7 @@ export class NotebookEditor extends EditorPane {
 					editorLoaded: editorLoaded - startTime
 				});
 			} else {
-				console.warn('notebook file open perf marks are broken');
+				console.warn(`notebook file open perf marks are broken: startTime ${startTime}, extensionActiviated ${extensionActivated}, inputLoaded ${inputLoaded}, customMarkdownLoaded ${customMarkdownLoaded}, editorLoaded ${editorLoaded}`);
 			}
 		}
 	}
@@ -310,7 +306,18 @@ export class NotebookEditor extends EditorPane {
 		super.saveState();
 	}
 
-	private _saveEditorViewState(input: IEditorInput | undefined): void {
+	override getViewState(): INotebookEditorViewState | undefined {
+		const input = this.input;
+		if (!(input instanceof NotebookEditorInput)) {
+			return undefined;
+		}
+
+		this._saveEditorViewState(input);
+		return this._loadNotebookEditorViewState(input);
+	}
+
+
+	private _saveEditorViewState(input: EditorInput | undefined): void {
 		if (this.group && this._widget.value && input instanceof NotebookEditorInput) {
 			if (this._widget.value.isDisposed) {
 				return;
@@ -348,7 +355,7 @@ export class NotebookEditor extends EditorPane {
 			return;
 		}
 
-		if (this._input.resource.toString() !== this._widget.value.viewModel?.uri.toString() && this._widget.value?.viewModel) {
+		if (this._input.resource.toString() !== this._widget.value.textModel?.uri.toString() && this._widget.value?.hasModel()) {
 			// input and widget mismatch
 			// this happens when
 			// 1. open document A, pin the document

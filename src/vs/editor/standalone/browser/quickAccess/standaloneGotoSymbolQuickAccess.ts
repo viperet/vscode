@@ -18,13 +18,17 @@ import { KeyMod, KeyCode } from 'vs/base/common/keyCodes';
 import { KeybindingWeight } from 'vs/platform/keybinding/common/keybindingsRegistry';
 import { ServicesAccessor } from 'vs/platform/instantiation/common/instantiation';
 import { IQuickInputService } from 'vs/platform/quickinput/common/quickInput';
+import { IOutlineModelService } from 'vs/editor/contrib/documentSymbols/outlineModel';
 
 export class StandaloneGotoSymbolQuickAccessProvider extends AbstractGotoSymbolQuickAccessProvider {
 
 	protected readonly onDidActiveTextEditorControlChange = Event.None;
 
-	constructor(@ICodeEditorService private readonly editorService: ICodeEditorService) {
-		super();
+	constructor(
+		@ICodeEditorService private readonly editorService: ICodeEditorService,
+		@IOutlineModelService outlineModelService: IOutlineModelService,
+	) {
+		super(outlineModelService);
 	}
 
 	protected get activeTextEditorControl() {
@@ -51,7 +55,7 @@ export class GotoLineAction extends EditorAction {
 			precondition: EditorContextKeys.hasDocumentSymbolProvider,
 			kbOpts: {
 				kbExpr: EditorContextKeys.focus,
-				primary: KeyMod.CtrlCmd | KeyMod.Shift | KeyCode.KEY_O,
+				primary: KeyMod.CtrlCmd | KeyMod.Shift | KeyCode.KeyO,
 				weight: KeybindingWeight.EditorContrib
 			},
 			contextMenuOpts: {

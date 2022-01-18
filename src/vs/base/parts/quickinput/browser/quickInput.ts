@@ -19,14 +19,14 @@ import { Action } from 'vs/base/common/actions';
 import { equals } from 'vs/base/common/arrays';
 import { TimeoutTimer } from 'vs/base/common/async';
 import { CancellationToken } from 'vs/base/common/cancellation';
-import { Codicon, registerCodicon } from 'vs/base/common/codicons';
+import { Codicon } from 'vs/base/common/codicons';
 import { Color } from 'vs/base/common/color';
 import { Emitter, Event } from 'vs/base/common/event';
 import { KeyCode } from 'vs/base/common/keyCodes';
 import { Disposable, DisposableStore, dispose } from 'vs/base/common/lifecycle';
 import { isIOS } from 'vs/base/common/platform';
 import Severity from 'vs/base/common/severity';
-import { isString } from 'vs/base/common/types';
+import { isString, withNullAsUndefined } from 'vs/base/common/types';
 import { getIconClass } from 'vs/base/parts/quickinput/browser/quickInputUtils';
 import { IInputBox, IInputOptions, IKeyMods, IPickOptions, IQuickInput, IQuickInputButton, IQuickInputHideEvent, IQuickNavigateConfiguration, IQuickPick, IQuickPickDidAcceptEvent, IQuickPickItem, IQuickPickItemButtonEvent, IQuickPickSeparator, IQuickPickWillAcceptEvent, ItemActivation, NO_KEY_MODS, QuickInputHideReason, QuickPickInput } from 'vs/base/parts/quickinput/common/quickInput';
 import 'vs/css!./media/quickInput';
@@ -74,11 +74,8 @@ const $ = dom.$;
 
 type Writeable<T> = { -readonly [P in keyof T]: T[P] };
 
-
-const backButtonIcon = registerCodicon('quick-input-back', Codicon.arrowLeft);
-
 const backButton = {
-	iconClass: backButtonIcon.classNames,
+	iconClass: Codicon.quickInputBack.classNames,
 	tooltip: localize('quickInput.back', "Back"),
 	handle: -1 // TODO
 };
@@ -285,7 +282,19 @@ class QuickInput extends Disposable implements IQuickInput {
 			}),
 		);
 		this.ui.show(this);
+
+		// update properties in the controller that get reset in the ui.show() call
 		this.visible = true;
+		// This ensures the message/prompt gets rendered
+		this._lastValidationMessage = undefined;
+		// This ensures the input box has the right severity applied
+		this._lastSeverity = undefined;
+		if (this.buttons.length) {
+			// if there are buttons, the ui.show() clears them out of the UI so we should
+			// rerender them.
+			this.buttonsUpdated = true;
+		}
+
 		this.update();
 	}
 
@@ -312,7 +321,7 @@ class QuickInput extends Disposable implements IQuickInput {
 		if (title && this.ui.title.textContent !== title) {
 			this.ui.title.textContent = title;
 		} else if (!title && this.ui.title.innerHTML !== '&nbsp;') {
-			this.ui.title.innerText = '\u00a0;';
+			this.ui.title.innerText = '\u00a0';
 		}
 		const description = this.getDescription();
 		if (this.ui.description1.textContent !== description) {
@@ -404,12 +413,12 @@ class QuickInput extends Disposable implements IQuickInput {
 			this.ui.message.style.color = styles.foreground ? `${styles.foreground}` : '';
 			this.ui.message.style.backgroundColor = styles.background ? `${styles.background}` : '';
 			this.ui.message.style.border = styles.border ? `1px solid ${styles.border}` : '';
-			this.ui.message.style.paddingBottom = '4px';
+			this.ui.message.style.marginBottom = '-2px';
 		} else {
 			this.ui.message.style.color = '';
 			this.ui.message.style.backgroundColor = '';
 			this.ui.message.style.border = '';
-			this.ui.message.style.paddingBottom = '';
+			this.ui.message.style.marginBottom = '';
 		}
 	}
 
@@ -443,6 +452,7 @@ class QuickPick<T extends IQuickPickItem> extends QuickInput implements IQuickPi
 	private _matchOnLabel = true;
 	private _sortByLabel = true;
 	private _autoFocusOnList = true;
+	private _keepScrollPosition = false;
 	private _itemActivation = this.ui.isScreenReaderOptimized() ? ItemActivation.NONE /* https://github.com/microsoft/vscode/issues/57501 */ : ItemActivation.FIRST;
 	private _activeItems: T[] = [];
 	private activeItemsUpdated = false;
@@ -477,9 +487,21 @@ class QuickPick<T extends IQuickPickItem> extends QuickInput implements IQuickPi
 	}
 
 	set value(value: string) {
+		this.doSetValue(value);
+	}
+
+	private doSetValue(value: string, skipUpdate?: boolean): void {
 		if (this._value !== value) {
-			this._value = value || '';
-			this.update();
+			this._value = value;
+			if (!skipUpdate) {
+				this.update();
+			}
+			if (this.visible) {
+				const didFilter = this.ui.list.filter(this.filterValue(this._value));
+				if (didFilter) {
+					this.trySelectFirst();
+				}
+			}
 			this.onDidChangeValueEmitter.fire(this._value);
 		}
 	}
@@ -513,6 +535,14 @@ class QuickPick<T extends IQuickPickItem> extends QuickInput implements IQuickPi
 
 	get items() {
 		return this._items;
+	}
+
+	private get scrollTop() {
+		return this.ui.list.scrollTop;
+	}
+
+	private set scrollTop(scrollTop: number) {
+		this.ui.list.scrollTop = scrollTop;
 	}
 
 	set items(items: Array<T | IQuickPickSeparator>) {
@@ -581,6 +611,14 @@ class QuickPick<T extends IQuickPickItem> extends QuickInput implements IQuickPi
 	set autoFocusOnList(autoFocusOnList: boolean) {
 		this._autoFocusOnList = autoFocusOnList;
 		this.update();
+	}
+
+	get keepScrollPosition() {
+		return this._keepScrollPosition;
+	}
+
+	set keepScrollPosition(keepScrollPosition: boolean) {
+		this._keepScrollPosition = keepScrollPosition;
 	}
 
 	get itemActivation() {
@@ -708,15 +746,7 @@ class QuickPick<T extends IQuickPickItem> extends QuickInput implements IQuickPi
 		if (!this.visible) {
 			this.visibleDisposables.add(
 				this.ui.inputBox.onDidChange(value => {
-					if (value === this.value) {
-						return;
-					}
-					this._value = value;
-					const didFilter = this.ui.list.filter(this.filterValue(this.ui.inputBox.value));
-					if (didFilter) {
-						this.trySelectFirst();
-					}
-					this.onDidChangeValueEmitter.fire(value);
+					this.doSetValue(value, true /* skip update since this originates from the UI */);
 				}));
 			this.visibleDisposables.add(this.ui.inputBox.onMouseDown(event => {
 				if (!this.autoFocusOnList) {
@@ -788,7 +818,16 @@ class QuickPick<T extends IQuickPickItem> extends QuickInput implements IQuickPi
 				}
 			}));
 			this.visibleDisposables.add(this.ui.onDidAccept(() => {
-				if (!this.canSelectMany && this.activeItems[0]) {
+				if (this.canSelectMany) {
+					// if there are no checked elements, it means that an onDidChangeSelection never fired to overwrite
+					// `_selectedItems`. In that case, we should emit one with an empty array to ensure that
+					// `.selectedItems` is up to date.
+					if (!this.ui.list.getCheckedElements().length) {
+						this._selectedItems = [];
+						this.onDidChangeSelectionEmitter.fire(this.selectedItems);
+					}
+				} else if (this.activeItems[0]) {
+					// For single-select, we set `selectedItems` to the item that was accepted.
 					this._selectedItems = [this.activeItems[0]];
 					this.onDidChangeSelectionEmitter.fire(this.selectedItems);
 				}
@@ -846,7 +885,7 @@ class QuickPick<T extends IQuickPickItem> extends QuickInput implements IQuickPi
 		let veto = false;
 		this.onWillAcceptEmitter.fire({ veto: () => veto = true });
 
-		// Continue with `onDidAccpet` if no veto
+		// Continue with `onDidAccept` if no veto
 		if (!veto) {
 			this.onDidAcceptEmitter.fire({ inBackground });
 		}
@@ -910,6 +949,8 @@ class QuickPick<T extends IQuickPickItem> extends QuickInput implements IQuickPi
 		if (!this.visible) {
 			return;
 		}
+		// store the scrollTop before it is reset
+		const scrollTopBefore = this.keepScrollPosition ? this.scrollTop : 0;
 		const hideInput = !!this._hideInput && this._items.length > 0;
 		this.ui.container.classList.toggle('hidden-input', hideInput && !this.description);
 		const visibilities: Visibilities = {
@@ -1009,6 +1050,11 @@ class QuickPick<T extends IQuickPickItem> extends QuickInput implements IQuickPi
 			if (this.canSelectMany) {
 				this.ui.list.focus(QuickInputListFocus.First);
 			}
+		}
+
+		// Set the scroll position to what it was before updating the items
+		if (this.keepScrollPosition) {
+			this.scrollTop = scrollTopBefore;
 		}
 	}
 }
@@ -1398,11 +1444,14 @@ export class QuickInputController extends Disposable {
 						if (index !== -1) {
 							const items = input.items.slice();
 							const removed = items.splice(index, 1);
-							const activeItems = input.activeItems.filter((ai) => ai !== removed[0]);
+							const activeItems = input.activeItems.filter(activeItem => activeItem !== removed[0]);
+							const keepScrollPositionBefore = input.keepScrollPosition;
+							input.keepScrollPosition = true;
 							input.items = items;
 							if (activeItems) {
 								input.activeItems = activeItems;
 							}
+							input.keepScrollPosition = keepScrollPositionBefore;
 						}
 					}
 				})),
@@ -1430,7 +1479,7 @@ export class QuickInputController extends Disposable {
 			input.quickNavigate = options.quickNavigate;
 			input.contextKey = options.contextKey;
 			input.busy = true;
-			Promise.all<QuickPickInput<T>[], T | undefined>([picks, options.activeItem])
+			Promise.all([picks, options.activeItem])
 				.then(([items, _activeItem]) => {
 					activeItem = _activeItem;
 					input.busy = false;
@@ -1638,8 +1687,12 @@ export class QuickInputController extends Disposable {
 			this.onHideEmitter.fire();
 			this.getUI().container.style.display = 'none';
 			if (!focusChanged) {
-				if (this.previousFocusElement && this.previousFocusElement.offsetParent) {
-					this.previousFocusElement.focus();
+				let currentElement = this.previousFocusElement;
+				while (currentElement && !currentElement.offsetParent) {
+					currentElement = withNullAsUndefined(currentElement.parentElement);
+				}
+				if (currentElement?.offsetParent) {
+					currentElement.focus();
 					this.previousFocusElement = undefined;
 				} else {
 					this.options.returnFocus();

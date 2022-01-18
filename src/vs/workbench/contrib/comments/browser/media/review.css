@@ -96,9 +96,16 @@
 
 
 .monaco-editor .review-widget .body .review-comment .review-comment-contents .isPending {
+	line-height: 22px;
 	margin: 0 5px 0 5px;
 	padding: 0 2px 0 2px;
 	font-style: italic;
+}
+
+.monaco-editor .review-widget .body .review-comment .review-comment-contents .timestamp {
+	line-height: 22px;
+	margin: 0 5px 0 5px;
+	padding: 0 2px 0 2px;
 }
 
 .monaco-editor .review-widget .body .review-comment .review-comment-contents .comment-body {
@@ -341,7 +348,6 @@
 
 .monaco-editor .review-widget .head .review-actions > .monaco-action-bar .action-label {
 	width: 16px;
-	height: 100%;
 	margin: 0;
 	line-height: inherit;
 	background-repeat: no-repeat;

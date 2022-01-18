@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import * as assert from 'assert';
-import { window, tasks, Disposable, TaskDefinition, Task, Task2, EventEmitter, CustomExecution, Pseudoterminal, TaskScope, commands, env, UIKind, ShellExecution, TaskExecution, Terminal, Event, workspace, ConfigurationTarget, TaskProcessStartEvent } from 'vscode';
+import { commands, ConfigurationTarget, CustomExecution, Disposable, env, Event, EventEmitter, Pseudoterminal, ShellExecution, Task, TaskDefinition, TaskExecution, TaskProcessStartEvent, tasks, TaskScope, Terminal, UIKind, window, workspace } from 'vscode';
 import { assertNoRpc } from '../utils';
 
 // Disable tasks tests:
@@ -97,11 +97,16 @@ import { assertNoRpc } from '../utils';
 					}
 				], ConfigurationTarget.Workspace);
 
-				// Run the task
-				commands.executeCommand('workbench.action.tasks.runTask', 'Run this task');
+				const waitForTaskToFinish = new Promise<void>(resolve => {
+					tasks.onDidEndTask(e => {
+						if (e.execution.task.name === 'Run this task') {
+							resolve();
+						}
+					});
+				});
 
-				// Listen for first task and verify valid process ID
-				const startEvent1 = await new Promise<TaskProcessStartEvent>(r => {
+				const waitForStartEvent1 = new Promise<TaskProcessStartEvent>(r => {
+					// Listen for first task and verify valid process ID
 					const listener = tasks.onDidStartTaskProcess(async (e) => {
 						if (e.execution.task.name === 'taskToDependOn') {
 							listener.dispose();
@@ -109,11 +114,10 @@ import { assertNoRpc } from '../utils';
 						}
 					});
 				});
-				assert.ok(startEvent1.processId);
 
-				// Listen for second task, verify valid process ID and that it's not the process ID of
-				// the first task
-				const startEvent2 = await new Promise<TaskProcessStartEvent>(r => {
+				const waitForStartEvent2 = new Promise<TaskProcessStartEvent>(r => {
+					// Listen for second task, verify valid process ID and that it's not the process ID of
+					// the first task
 					const listener = tasks.onDidStartTaskProcess(async (e) => {
 						if (e.execution.task.name === 'Run this task') {
 							listener.dispose();
@@ -121,9 +125,17 @@ import { assertNoRpc } from '../utils';
 						}
 					});
 				});
+
+				// Run the task
+				commands.executeCommand('workbench.action.tasks.runTask', 'Run this task');
+
+				const startEvent1 = await waitForStartEvent1;
+				assert.ok(startEvent1.processId);
+
+				const startEvent2 = await waitForStartEvent2;
 				assert.ok(startEvent2.processId);
 				assert.notStrictEqual(startEvent1.processId, startEvent2.processId);
-
+				await waitForTaskToFinish;
 				// Clear out tasks config
 				await tasksConfig.update('tasks', []);
 			});
@@ -350,7 +362,7 @@ import { assertNoRpc } from '../utils';
 						}
 					], ConfigurationTarget.Workspace);
 
-					const task = <Task2[]>(await tasks.fetchTasks());
+					const task = <Task[]>(await tasks.fetchTasks());
 
 					if (task && task.length > 0) {
 						const grp = task[0].group;
@@ -362,6 +374,70 @@ import { assertNoRpc } from '../utils';
 					// Reset tasks.json
 					await tasksConfig.update('tasks', []);
 				});
+			});
+
+			test('Tasks can be run back to back', async () => {
+				class Pty implements Pseudoterminal {
+					writer = new EventEmitter<string>();
+					onDidWrite = this.writer.event;
+					closer = new EventEmitter<number | undefined>();
+					onDidClose = this.closer.event;
+
+					constructor(readonly num: number, readonly quick: boolean) { }
+
+					cleanup() {
+						this.writer.dispose();
+						this.closer.dispose();
+					}
+
+					open() {
+						this.writer.fire('starting\r\n');
+						setTimeout(() => {
+							this.closer.fire(this.num);
+							this.cleanup();
+						}, this.quick ? 1 : 200);
+					}
+
+					close() {
+						this.closer.fire(undefined);
+						this.cleanup();
+					}
+				}
+
+				async function runTask(num: number, quick: boolean) {
+					const pty = new Pty(num, quick);
+					const task = new Task(
+						{ type: 'task_bug', exampleProp: `hello world ${num}` },
+						TaskScope.Workspace, `task bug ${num}`, 'task bug',
+						new CustomExecution(
+							async () => {
+								return pty;
+							},
+						));
+					tasks.executeTask(task);
+					return new Promise<number | undefined>(resolve => {
+						pty.onDidClose(exitCode => {
+							resolve(exitCode);
+						});
+					});
+				}
+
+
+				const [r1, r2, r3, r4] = await Promise.all([
+					runTask(1, false), runTask(2, false), runTask(3, false), runTask(4, false)
+				]);
+				assert.strictEqual(r1, 1);
+				assert.strictEqual(r2, 2);
+				assert.strictEqual(r3, 3);
+				assert.strictEqual(r4, 4);
+
+				const [j1, j2, j3, j4] = await Promise.all([
+					runTask(5, true), runTask(6, true), runTask(7, true), runTask(8, true)
+				]);
+				assert.strictEqual(j1, 5);
+				assert.strictEqual(j2, 6);
+				assert.strictEqual(j3, 7);
+				assert.strictEqual(j4, 8);
 			});
 		});
 	});

@@ -200,6 +200,13 @@ export class DisposableStore implements IDisposable {
 	}
 
 	/**
+	 * Returns `true` if this object has been disposed
+	 */
+	public get isDisposed(): boolean {
+		return this._isDisposed;
+	}
+
+	/**
 	 * Dispose of all registered disposables but do not mark this object as disposed.
 	 */
 	public clear(): void {
@@ -393,4 +400,13 @@ export class AsyncReferenceCollection<T> {
 export class ImmortalReference<T> implements IReference<T> {
 	constructor(public object: T) { }
 	dispose(): void { /* noop */ }
+}
+
+export function disposeOnReturn(fn: (store: DisposableStore) => void): void {
+	const store = new DisposableStore();
+	try {
+		fn(store);
+	} finally {
+		store.dispose();
+	}
 }

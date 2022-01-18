@@ -5,10 +5,10 @@
 
 import { Event, EventMultiplexer } from 'vs/base/common/event';
 import {
-	ILocalExtension, IGalleryExtension, IExtensionIdentifier, IReportedExtension, IGalleryMetadata, IExtensionGalleryService, InstallOptions, UninstallOptions, INSTALL_ERROR_NOT_SUPPORTED, InstallVSIXOptions, InstallExtensionResult
+	ILocalExtension, IGalleryExtension, IExtensionIdentifier, IExtensionsControlManifest, IGalleryMetadata, IExtensionGalleryService, InstallOptions, UninstallOptions, InstallVSIXOptions, InstallExtensionResult, TargetPlatform, ExtensionManagementError, ExtensionManagementErrorCode
 } from 'vs/platform/extensionManagement/common/extensionManagement';
 import { DidUninstallExtensionOnServerEvent, IExtensionManagementServer, IExtensionManagementServerService, InstallExtensionOnServerEvent, IWorkbenchExtensionManagementService, UninstallExtensionOnServerEvent } from 'vs/workbench/services/extensionManagement/common/extensionManagement';
-import { ExtensionType, isLanguagePackExtension, IExtensionManifest } from 'vs/platform/extensions/common/extensions';
+import { ExtensionType, isLanguagePackExtension, IExtensionManifest, getWorkspaceSupportTypeMessage } from 'vs/platform/extensions/common/extensions';
 import { URI } from 'vs/base/common/uri';
 import { Disposable } from 'vs/base/common/lifecycle';
 import { IConfigurationService } from 'vs/platform/configuration/common/configuration';
@@ -22,10 +22,13 @@ import { flatten } from 'vs/base/common/arrays';
 import { IDialogService } from 'vs/platform/dialogs/common/dialogs';
 import Severity from 'vs/base/common/severity';
 import { canceled } from 'vs/base/common/errors';
-import { IUserDataAutoSyncEnablementService, IUserDataSyncResourceEnablementService, SyncResource } from 'vs/platform/userDataSync/common/userDataSync';
+import { IUserDataSyncEnablementService, SyncResource } from 'vs/platform/userDataSync/common/userDataSync';
 import { Promises } from 'vs/base/common/async';
 import { IWorkspaceTrustRequestService } from 'vs/platform/workspace/common/workspaceTrust';
 import { IExtensionManifestPropertiesService } from 'vs/workbench/services/extensions/common/extensionManifestPropertiesService';
+import { IInstantiationService } from 'vs/platform/instantiation/common/instantiation';
+import { ICommandService } from 'vs/platform/commands/common/commands';
+import { isUndefined } from 'vs/base/common/types';
 
 export class ExtensionManagementService extends Disposable implements IWorkbenchExtensionManagementService {
 
@@ -44,11 +47,11 @@ export class ExtensionManagementService extends Disposable implements IWorkbench
 		@IConfigurationService protected readonly configurationService: IConfigurationService,
 		@IProductService protected readonly productService: IProductService,
 		@IDownloadService protected readonly downloadService: IDownloadService,
-		@IUserDataAutoSyncEnablementService private readonly userDataAutoSyncEnablementService: IUserDataAutoSyncEnablementService,
-		@IUserDataSyncResourceEnablementService private readonly userDataSyncResourceEnablementService: IUserDataSyncResourceEnablementService,
+		@IUserDataSyncEnablementService private readonly userDataSyncEnablementService: IUserDataSyncEnablementService,
 		@IDialogService private readonly dialogService: IDialogService,
 		@IWorkspaceTrustRequestService private readonly workspaceTrustRequestService: IWorkspaceTrustRequestService,
 		@IExtensionManifestPropertiesService private readonly extensionManifestPropertiesService: IExtensionManifestPropertiesService,
+		@IInstantiationService private readonly instantiationService: IInstantiationService,
 	) {
 		super();
 		if (this.extensionManagementServerService.localExtensionManagementServer) {
@@ -67,8 +70,8 @@ export class ExtensionManagementService extends Disposable implements IWorkbench
 		this.onDidUninstallExtension = this._register(this.servers.reduce((emitter: EventMultiplexer<DidUninstallExtensionOnServerEvent>, server) => { emitter.add(Event.map(server.extensionManagementService.onDidUninstallExtension, e => ({ ...e, server }))); return emitter; }, new EventMultiplexer<DidUninstallExtensionOnServerEvent>())).event;
 	}
 
-	async getInstalled(type?: ExtensionType): Promise<ILocalExtension[]> {
-		const result = await Promise.all(this.servers.map(({ extensionManagementService }) => extensionManagementService.getInstalled(type)));
+	async getInstalled(type?: ExtensionType, donotIgnoreInvalidExtensions?: boolean): Promise<ILocalExtension[]> {
+		const result = await Promise.all(this.servers.map(({ extensionManagementService }) => extensionManagementService.getInstalled(type, donotIgnoreInvalidExtensions)));
 		return flatten(result);
 	}
 
@@ -222,15 +225,28 @@ export class ExtensionManagementService extends Disposable implements IWorkbench
 	}
 
 	async canInstall(gallery: IGalleryExtension): Promise<boolean> {
-		for (const server of this.servers) {
-			if (await server.extensionManagementService.canInstall(gallery)) {
-				return true;
-			}
+		if (this.extensionManagementServerService.localExtensionManagementServer
+			&& await this.extensionManagementServerService.localExtensionManagementServer.extensionManagementService.canInstall(gallery)) {
+			return true;
+		}
+		const manifest = await this.extensionGalleryService.getManifest(gallery, CancellationToken.None);
+		if (!manifest) {
+			return false;
+		}
+		if (this.extensionManagementServerService.remoteExtensionManagementServer
+			&& await this.extensionManagementServerService.remoteExtensionManagementServer.extensionManagementService.canInstall(gallery)
+			&& this.extensionManifestPropertiesService.canExecuteOnWorkspace(manifest)) {
+			return true;
+		}
+		if (this.extensionManagementServerService.webExtensionManagementServer
+			&& await this.extensionManagementServerService.webExtensionManagementServer.extensionManagementService.canInstall(gallery)
+			&& this.extensionManifestPropertiesService.canExecuteOnWeb(manifest)) {
+			return true;
 		}
 		return false;
 	}
 
-	async updateFromGallery(gallery: IGalleryExtension, extension: ILocalExtension): Promise<ILocalExtension> {
+	async updateFromGallery(gallery: IGalleryExtension, extension: ILocalExtension, installOptions?: InstallOptions): Promise<ILocalExtension> {
 		const server = this.getServer(extension);
 		if (!server) {
 			return Promise.reject(`Invalid location ${extension.location.toString()}`);
@@ -245,7 +261,7 @@ export class ExtensionManagementService extends Disposable implements IWorkbench
 			servers.push(server);
 		}
 
-		return Promises.settled(servers.map(server => server.extensionManagementService.installFromGallery(gallery))).then(([local]) => local);
+		return Promises.settled(servers.map(server => server.extensionManagementService.installFromGallery(gallery, installOptions))).then(([local]) => local);
 	}
 
 	async installExtensions(extensions: IGalleryExtension[], installOptions?: InstallOptions): Promise<ILocalExtension[]> {
@@ -276,21 +292,24 @@ export class ExtensionManagementService extends Disposable implements IWorkbench
 		}
 
 		if (servers.length) {
-			if (!installOptions) {
+			if (!installOptions || isUndefined(installOptions.isMachineScoped)) {
 				const isMachineScoped = await this.hasToFlagExtensionsMachineScoped([gallery]);
-				installOptions = { isMachineScoped, isBuiltin: false };
+				installOptions = { ...(installOptions || {}), isMachineScoped };
 			}
 			if (!installOptions.isMachineScoped && this.isExtensionsSyncEnabled()) {
-				if (this.extensionManagementServerService.localExtensionManagementServer && !servers.includes(this.extensionManagementServerService.localExtensionManagementServer)) {
+				if (this.extensionManagementServerService.localExtensionManagementServer && !servers.includes(this.extensionManagementServerService.localExtensionManagementServer) && (await this.extensionManagementServerService.localExtensionManagementServer.extensionManagementService.canInstall(gallery))) {
 					servers.push(this.extensionManagementServerService.localExtensionManagementServer);
 				}
 			}
 			await this.checkForWorkspaceTrust(manifest);
+			if (!installOptions.donotIncludePackAndDependencies) {
+				await this.checkInstallingExtensionOnWeb(gallery, manifest);
+			}
 			return Promises.settled(servers.map(server => server.extensionManagementService.installFromGallery(gallery, installOptions))).then(([local]) => local);
 		}
 
 		const error = new Error(localize('cannot be installed', "Cannot install the '{0}' extension because it is not available in this setup.", gallery.displayName || gallery.name));
-		error.name = INSTALL_ERROR_NOT_SUPPORTED;
+		error.name = ExtensionManagementErrorCode.Unsupported;
 		return Promise.reject(error);
 	}
 
@@ -319,7 +338,7 @@ export class ExtensionManagementService extends Disposable implements IWorkbench
 	}
 
 	private isExtensionsSyncEnabled(): boolean {
-		return this.userDataAutoSyncEnablementService.isEnabled() && this.userDataSyncResourceEnablementService.isResourceEnabled(SyncResource.Extensions);
+		return this.userDataSyncEnablementService.isEnabled() && this.userDataSyncEnablementService.isResourceEnabled(SyncResource.Extensions);
 	}
 
 	private async hasToFlagExtensionsMachineScoped(extensions: IGalleryExtension[]): Promise<boolean> {
@@ -350,14 +369,17 @@ export class ExtensionManagementService extends Disposable implements IWorkbench
 		return false;
 	}
 
-	getExtensionsReport(): Promise<IReportedExtension[]> {
+	getExtensionsControlManifest(): Promise<IExtensionsControlManifest> {
 		if (this.extensionManagementServerService.localExtensionManagementServer) {
-			return this.extensionManagementServerService.localExtensionManagementServer.extensionManagementService.getExtensionsReport();
+			return this.extensionManagementServerService.localExtensionManagementServer.extensionManagementService.getExtensionsControlManifest();
 		}
 		if (this.extensionManagementServerService.remoteExtensionManagementServer) {
-			return this.extensionManagementServerService.remoteExtensionManagementServer.extensionManagementService.getExtensionsReport();
+			return this.extensionManagementServerService.remoteExtensionManagementServer.extensionManagementService.getExtensionsControlManifest();
 		}
-		return Promise.resolve([]);
+		if (this.extensionManagementServerService.webExtensionManagementServer) {
+			return this.extensionManagementServerService.webExtensionManagementServer.extensionManagementService.getExtensionsControlManifest();
+		}
+		return Promise.resolve({ malicious: [] });
 	}
 
 	private getServer(extension: ILocalExtension): IExtensionManagementServer | null {
@@ -376,12 +398,70 @@ export class ExtensionManagementService extends Disposable implements IWorkbench
 			});
 
 			if (trustState === undefined) {
-				return Promise.reject(canceled());
+				throw canceled();
+			}
+		}
+	}
+
+	private async checkInstallingExtensionOnWeb(extension: IGalleryExtension, manifest: IExtensionManifest): Promise<void> {
+		if (this.servers.length !== 1 || this.servers[0] !== this.extensionManagementServerService.webExtensionManagementServer) {
+			return;
+		}
+
+		const nonWebExtensions = [];
+		if (manifest.extensionPack?.length) {
+			const extensions = await this.extensionGalleryService.getExtensions(manifest.extensionPack.map(id => ({ id })), CancellationToken.None);
+			for (const extension of extensions) {
+				if (!(await this.servers[0].extensionManagementService.canInstall(extension))) {
+					nonWebExtensions.push(extension);
+				}
+			}
+			if (nonWebExtensions.length && nonWebExtensions.length === extensions.length) {
+				throw new ExtensionManagementError('Not supported in Web', ExtensionManagementErrorCode.Unsupported);
 			}
 		}
 
-		return Promise.resolve();
+		const productName = localize('VS Code for Web', "{0} for the Web", this.productService.nameLong);
+		const virtualWorkspaceSupport = this.extensionManifestPropertiesService.getExtensionVirtualWorkspaceSupportType(manifest);
+		const virtualWorkspaceSupportReason = getWorkspaceSupportTypeMessage(manifest.capabilities?.virtualWorkspaces);
+		const hasLimitedSupport = virtualWorkspaceSupport === 'limited' || !!virtualWorkspaceSupportReason;
+
+		if (!nonWebExtensions.length && !hasLimitedSupport) {
+			return;
+		}
+
+		const limitedSupportMessage = localize('limited support', "'{0}' has limited functionality in {1}.", extension.displayName || extension.identifier.id, productName);
+		let message: string, buttons: string[], detail: string | undefined;
+
+		if (nonWebExtensions.length && hasLimitedSupport) {
+			message = limitedSupportMessage;
+			detail = `${virtualWorkspaceSupportReason ? `${virtualWorkspaceSupportReason}\n` : ''}${localize('non web extensions detail', "Contains extensions which are not supported.")}`;
+			buttons = [localize('install anyways', "Install Anyway"), localize('showExtensions', "Show Extensions"), localize('cancel', "Cancel")];
+		}
+
+		else if (hasLimitedSupport) {
+			message = limitedSupportMessage;
+			detail = virtualWorkspaceSupportReason || undefined;
+			buttons = [localize('install anyways', "Install Anyway"), localize('cancel', "Cancel")];
+		}
+
+		else {
+			message = localize('non web extensions', "'{0}' contains extensions which are not supported in {1}.", extension.displayName || extension.identifier.id, productName);
+			buttons = [localize('install anyways', "Install Anyway"), localize('showExtensions', "Show Extensions"), localize('cancel', "Cancel")];
+		}
+
+		const { choice } = await this.dialogService.show(Severity.Info, message, buttons, { cancelId: buttons.length - 1, detail });
+		if (choice === 0) {
+			return;
+		}
+		if (choice === buttons.length - 2) {
+			// Unfortunately ICommandService cannot be used directly due to cyclic dependencies
+			this.instantiationService.invokeFunction(accessor => accessor.get(ICommandService).executeCommand('extension.open', extension.identifier.id, 'extensionPack'));
+		}
+		throw canceled();
+
 	}
 
 	registerParticipant() { throw new Error('Not Supported'); }
+	getTargetPlatform(): Promise<TargetPlatform> { throw new Error('Not Supported'); }
 }

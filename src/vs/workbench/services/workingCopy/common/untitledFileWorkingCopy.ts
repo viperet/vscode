@@ -78,7 +78,7 @@ export interface IUntitledFileWorkingCopyInitialContents {
 	/**
 	 * The initial contents of the untitled file working copy.
 	 */
-	value: VSBufferReadableStream;
+	readonly value: VSBufferReadableStream;
 
 	/**
 	 * If not provided, the untitled file working copy will be marked
@@ -87,7 +87,7 @@ export interface IUntitledFileWorkingCopyInitialContents {
 	 * Note: if the untitled file working copy has an associated path
 	 * the dirty state will always be set.
 	 */
-	markDirty?: boolean;
+	readonly markDirty?: boolean;
 }
 
 export class UntitledFileWorkingCopy<M extends IUntitledFileWorkingCopyModel> extends Disposable implements IUntitledFileWorkingCopy<M>  {
@@ -190,7 +190,7 @@ export class UntitledFileWorkingCopy<M extends IUntitledFileWorkingCopyModel> ex
 		this.setDirty(this.hasAssociatedFilePath || !!backup || Boolean(this.initialContents && this.initialContents.markDirty !== false));
 
 		// If we have initial contents, make sure to emit this
-		// as the appropiate events to the outside.
+		// as the appropriate events to the outside.
 		if (!!backup || this.initialContents) {
 			this._onDidChangeContent.fire();
 		}

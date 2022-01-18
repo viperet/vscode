@@ -6,11 +6,11 @@
 				"git": {
 					"name": "Ikuyadeu/vscode-R",
 					"repositoryUrl": "https://github.com/Ikuyadeu/vscode-R",
-					"commitHash": "f98bd30417c203876969408440f656f56eba80d8"
+					"commitHash": "f99fdd79533b62b0b6eb6142190963349aa621d7"
 				}
 			},
 			"license": "MIT",
-			"version": "2.0.0"
+			"version": "2.3.2"
 		}
 	],
 	"version": 1
