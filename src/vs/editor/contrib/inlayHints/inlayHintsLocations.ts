@@ -4,19 +4,20 @@
  *--------------------------------------------------------------------------------------------*/
 
 import * as dom from 'vs/base/browser/dom';
-import { Action, IAction } from 'vs/base/common/actions';
+import { Action, IAction, Separator } from 'vs/base/common/actions';
 import { CancellationToken } from 'vs/base/common/cancellation';
 import { IActiveCodeEditor, ICodeEditor } from 'vs/editor/browser/editorBrowser';
 import { EditorExtensionsRegistry } from 'vs/editor/browser/editorExtensions';
 import { EditorOption } from 'vs/editor/common/config/editorOptions';
 import { Range } from 'vs/editor/common/core/range';
-import { Command, Location } from 'vs/editor/common/languages';
+import { Location } from 'vs/editor/common/languages';
 import { ITextModelService } from 'vs/editor/common/services/resolverService';
 import { DefinitionAction, SymbolNavigationAction, SymbolNavigationAnchor } from 'vs/editor/contrib/gotoSymbol/goToCommands';
 import { ClickLinkMouseEvent } from 'vs/editor/contrib/gotoSymbol/link/clickLinkGesture';
 import { RenderedInlayHintLabelPart } from 'vs/editor/contrib/inlayHints/inlayHintsController';
 import { PeekContext } from 'vs/editor/contrib/peekView/peekView';
 import { isIMenuItem, MenuId, MenuRegistry } from 'vs/platform/actions/common/actions';
+import { ICommandService } from 'vs/platform/commands/common/commands';
 import { IContextKeyService } from 'vs/platform/contextkey/common/contextkey';
 import { IContextMenuService } from 'vs/platform/contextview/browser/contextView';
 import { IInstantiationService, ServicesAccessor } from 'vs/platform/instantiation/common/instantiation';
@@ -25,15 +26,16 @@ export async function showGoToContextMenu(accessor: ServicesAccessor, editor: IC
 
 	const resolverService = accessor.get(ITextModelService);
 	const contextMenuService = accessor.get(IContextMenuService);
+	const commandService = accessor.get(ICommandService);
 	const instaService = accessor.get(IInstantiationService);
 
 	await part.item.resolve(CancellationToken.None);
 
-	if (!part.part.action || Command.is(part.part.action)) {
+	if (!part.part.location) {
 		return;
 	}
 
-	const location: Location = part.part.action;
+	const location: Location = part.part.location;
 	const menuActions: IAction[] = [];
 
 	// from all registered (not active) context menu actions select those
@@ -53,6 +55,14 @@ export async function showGoToContextMenu(accessor: ServicesAccessor, editor: IC
 				}
 			}));
 		}
+	}
+
+	if (part.part.command) {
+		const { command } = part.part;
+		menuActions.push(new Separator());
+		menuActions.push(new Action(command.id, command.title, undefined, true, () => {
+			commandService.executeCommand(command.id, ...(command.arguments ?? []));
+		}));
 	}
 
 	// show context menu

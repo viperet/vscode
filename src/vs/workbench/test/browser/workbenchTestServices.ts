@@ -149,6 +149,7 @@ import { env } from 'vs/base/common/process';
 import { isValidBasename } from 'vs/base/common/extpath';
 import { TestAccessibilityService } from 'vs/platform/accessibility/test/common/testAccessibilityService';
 import { ILanguageFeatureDebounceService, LanguageFeatureDebounceService } from 'vs/editor/common/services/languageFeatureDebounce';
+import { IClipboardService } from 'vs/platform/clipboard/common/clipboardService';
 
 export function createFileEditorInput(instantiationService: IInstantiationService, resource: URI): FileEditorInput {
 	return instantiationService.createInstance(FileEditorInput, resource, undefined, undefined, undefined, undefined, undefined, undefined);
@@ -542,7 +543,7 @@ export class TestLayoutService implements IWorkbenchLayoutService {
 	onDidChangeCenteredLayout: Event<boolean> = Event.None;
 	onDidChangeFullscreen: Event<boolean> = Event.None;
 	onDidChangeWindowMaximized: Event<boolean> = Event.None;
-	onDidChangePanelPosition: Event<string> = Event.None;
+	onDidChangePanelAlignment: Event<PanelAlignment> = Event.None;
 	onDidChangePartVisibility: Event<void> = Event.None;
 	onDidLayout = Event.None;
 	onDidChangeNotificationsVisibility = Event.None;
@@ -576,7 +577,7 @@ export class TestLayoutService implements IWorkbenchLayoutService {
 	getMenubarVisibility(): MenuBarVisibility { throw new Error('not implemented'); }
 	toggleMenuBar(): void { }
 	getSideBarPosition() { return 0; }
-	getPanelPosition() { return 0; }
+	getPanelAlignment(): PanelAlignment { return 'center'; }
 	async setPanelPosition(_position: PartPosition): Promise<void> { }
 	async setPanelAlignment(_alignment: PanelAlignment): Promise<void> { }
 	addClass(_clazz: string): void { }
@@ -1891,4 +1892,43 @@ export class TestEditorWorkerService implements IEditorWorkerService {
 	async computeWordRanges(resource: URI, range: IRange): Promise<{ [word: string]: IRange[]; } | null> { return null; }
 	canNavigateValueSet(resource: URI): boolean { return false; }
 	async navigateValueSet(resource: URI, range: IRange, up: boolean): Promise<IInplaceReplaceSupportResult | null> { return null; }
+}
+
+export class TestClipboardService implements IClipboardService {
+
+	_serviceBrand: undefined;
+
+	private text: string | undefined = undefined;
+
+	async writeText(text: string, type?: string): Promise<void> {
+		this.text = text;
+	}
+
+	async readText(type?: string): Promise<string> {
+		return this.text ?? '';
+	}
+
+	private findText: string | undefined = undefined;
+
+	async readFindText(): Promise<string> {
+		return this.findText ?? '';
+	}
+
+	async writeFindText(text: string): Promise<void> {
+		this.findText = text;
+	}
+
+	private resources: URI[] | undefined = undefined;
+
+	async writeResources(resources: URI[]): Promise<void> {
+		this.resources = resources;
+	}
+
+	async readResources(): Promise<URI[]> {
+		return this.resources ?? [];
+	}
+
+	async hasResources(): Promise<boolean> {
+		return Array.isArray(this.resources) && this.resources.length > 0;
+	}
 }

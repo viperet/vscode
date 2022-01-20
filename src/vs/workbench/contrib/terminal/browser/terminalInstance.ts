@@ -27,7 +27,7 @@ import { ITerminalProcessManager, ProcessState, TERMINAL_VIEW_ID, INavigationMod
 import { TerminalConfigHelper } from 'vs/workbench/contrib/terminal/browser/terminalConfigHelper';
 import { IDetectedLinks, TerminalLinkManager } from 'vs/workbench/contrib/terminal/browser/links/terminalLinkManager';
 import { IAccessibilityService } from 'vs/platform/accessibility/common/accessibility';
-import { ITerminalInstance, ITerminalExternalLinkProvider, IRequestAddInstanceToGroupEvent, TerminalCommand } from 'vs/workbench/contrib/terminal/browser/terminal';
+import { ITerminalInstance, ITerminalExternalLinkProvider, IRequestAddInstanceToGroupEvent, TerminalCommand, TerminalLinkQuickPickEvent } from 'vs/workbench/contrib/terminal/browser/terminal';
 import { TerminalProcessManager } from 'vs/workbench/contrib/terminal/browser/terminalProcessManager';
 import type { Terminal as XTermTerminal, ITerminalAddon, ILink } from 'xterm';
 import { NavigationModeAddon } from 'vs/workbench/contrib/terminal/browser/xterm/navigationModeAddon';
@@ -700,6 +700,28 @@ export class TerminalInstance extends Disposable implements ITerminalInstance {
 		return { wordLinks: wordResults, webLinks: webResults, fileLinks: fileResults };
 	}
 
+	async openRecentLink(type: 'file' | 'web'): Promise<void> {
+		if (!this.areLinksReady || !this._linkManager) {
+			throw new Error('terminal links are not ready, cannot open a link');
+		}
+		if (!this.xterm) {
+			throw new Error('no xterm');
+		}
+
+		let links;
+		let i = this.xterm.raw.buffer.active.viewportY;
+		while ((!links || links.length === 0) && i <= this.xterm.raw.buffer.active.length) {
+			links = await this._linkManager.getLinksForType(i, type);
+			i++;
+		}
+
+		if (!links || links.length < 1) {
+			return;
+		}
+		const event = new TerminalLinkQuickPickEvent(dom.EventType.CLICK);
+		links[0].activate(event, links[0].text);
+	}
+
 	async runRecent(type: 'command' | 'cwd'): Promise<void> {
 		const commands = this.xterm?.commandTracker.commands;
 		if (!commands || !this.xterm) {
@@ -1281,7 +1303,7 @@ export class TerminalInstance extends Disposable implements ITerminalInstance {
 				this._onProcessExit(error, enableShellIntegration);
 			}
 		});
-		if (enableShellIntegration && this.xterm?.shellIntegration) {
+		if (this.xterm?.shellIntegration) {
 			this.capabilities.add(this.xterm?.shellIntegration.capabilities);
 		}
 		if (!hadIcon && this.shellLaunchConfig.icon || this.shellLaunchConfig.color) {
@@ -1290,15 +1312,20 @@ export class TerminalInstance extends Disposable implements ITerminalInstance {
 	}
 
 	private _updateArgsForShellIntegration(shellLaunchConfig: IShellLaunchConfig): { args: string | string[] | undefined, enableShellIntegration: boolean } {
-		const originalArgs = shellLaunchConfig.args;
-		if (!this._configHelper.config.enableShellIntegration || !shellLaunchConfig.executable) {
-			return { args: originalArgs, enableShellIntegration: false };
+		// Shell integration arg injection is disabled when:
+		// - The global setting is disabled
+		// - There is no executable (not sure what script to run)
+		// - The terminal is used by a feature like tasks or debugging
+		if (!this._configHelper.config.enableShellIntegration || !shellLaunchConfig.executable || shellLaunchConfig.isFeatureTerminal) {
+			return { args: shellLaunchConfig.args, enableShellIntegration: false };
 		}
+
+		const originalArgs = shellLaunchConfig.args;
 		const shell = path.basename(shellLaunchConfig.executable);
 		let newArgs: string | string[] | undefined;
 		// TODO: Use backend OS
 		if (isWindows) {
-			if (shell === 'pwsh' && !originalArgs) {
+			if (shell === 'pwsh.exe' && !originalArgs) {
 				newArgs = [
 					'-noexit',
 					'-command',

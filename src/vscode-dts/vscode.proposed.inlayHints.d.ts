@@ -38,13 +38,45 @@ declare module 'vscode' {
 	}
 
 	export class InlayHintLabelPart {
+
+		/**
+		 * The value of this label part.
+		 */
 		label: string;
 
-		// todo@API implement this!
-		collapsible?: boolean;
+		/**
+		 * The tooltip text when you hover over this label part.
+		 */
+		tooltip?: string | MarkdownString | undefined;
 
-		// todo@api better name!
-		action?: Command | Location; // invokes provider
+		/**
+		 * An optional {@link Location source code location} that represents this label
+		 * part.
+		 *
+		 * The editor will use this location for the hover and for code navigation features: This
+		 * part will become a clickable link that resolves to the definition of the symbol at the
+		 * given location (not neccessarily the location itself), it shows the hover that shows at
+		 * the given location, and it shows a context menu with further code navigation commands.
+		 *
+		 * *Note* that this property can be set late during
+		 * {@link InlayHintsProvider.resolveInlayHint resolving} of inlay hints.
+		 */
+		location?: Location | undefined;
+
+		/**
+		 * An optional command for this label part.
+		 *
+		 * The editor renders parts with commands as clickable links. The command is added to the context menu
+		 * when a label part defines {@link InlayHintLabelPart.location location} and {@link InlayHintLabelPart.command command} .
+		 *
+		 * *Note* that this property can be set late during
+		 * {@link InlayHintsProvider.resolveInlayHint resolving} of inlay hints.
+		 */
+		command?: Command | undefined;
+
+		// todo@api
+		// context menu, contextMenuCommands
+		// secondaryCommands?: Command[];
 
 		constructor(label: string);
 	}
@@ -64,22 +96,23 @@ declare module 'vscode' {
 		/**
 		 * The tooltip text when you hover over this item.
 		 */
-		// todo@API better name, more model'ish description, detail
 		tooltip?: string | MarkdownString | undefined;
 		/**
 		 * The kind of this hint.
 		 */
 		kind?: InlayHintKind;
+
 		/**
-		 * Whitespace before the hint.
+		 * Render padding before the hint.
 		 */
-		// todo@API better name
-		whitespaceBefore?: boolean;
+		paddingLeft?: boolean;
 		/**
-		 * Whitespace after the hint.
+		 * Render padding after the hint.
 		 */
-		// todo@API better name
-		whitespaceAfter?: boolean;
+		paddingRight?: boolean;
+
+		// emphemeral overlay mode
+		// overlayRange?: Range;
 
 		// todo@API make range first argument
 		constructor(label: string | InlayHintLabelPart[], position: Position, kind?: InlayHintKind);
